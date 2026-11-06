@@ -418,7 +418,6 @@ pako/dist/pako.esm.mjs:
     <div class="actions">
       <button id="claimBtn" onclick="doClaim()" disabled>Claim → Lock</button>
       <button id="wdBtn" onclick="doWithdraw()" disabled>Withdraw</button>
-      <button id="closeBtn" class="ghost" onclick="doCloseMonth()" disabled>Close Month</button>
     </div>
   </section>
 
@@ -528,12 +527,6 @@ function gateButtons(){
   const quotaLeft = hasMiner ? (quota + (boosted ? 1 : 0) - solvesToday) : 0;
   const pending = hasMiner ? Number(minerData.pendingRewards) : 0;
   const lockReleasable = lockExists && lockData ? (Number(lockData.totalLocked) > Number(lockData.totalReleased)) : false;
-  // Close Month: only after the current month rolled over.
-  let monthEnded = false;
-  if (configData){
-    const monthStart = Number(configData.startMonth) + (Number(configData.currentMonth) - 1) * Number(configData.monthSecs);
-    monthEnded = now >= monthStart + Number(configData.monthSecs);
-  }
   const set = (id, enabled, why) => { const b = $(id); if (!b) return; b.disabled = !enabled; b.title = enabled ? "" : why; };
   set("stakeBtn", hasWallet && !staked, staked ? "Sudah ada stake aktif — Unstake dulu sebelum stake lagi." : "Hubungkan wallet dulu.");
   set("unstakeBtn", hasWallet && staked && lockExpired, !staked ? "Belum ada stake." : (!lockExpired ? "Stake masih terkunci sampai lock habis." : "Hubungkan wallet dulu."));
@@ -541,11 +534,10 @@ function gateButtons(){
   set("submitBtn", hasWallet && staked && !lockExpired && quotaLeft > 0, !staked ? "Stake dulu sebelum submit." : (lockExpired ? "Lock stake sudah habis — Unstake lalu Stake lagi." : (quotaLeft <= 0 ? "Kuota solve hari ini sudah habis." : "Hubungkan wallet dulu.")));
   set("claimBtn", hasWallet && pending > 0, pending > 0 ? "" : "Tidak ada reward pending — submit solve dulu.");
   set("wdBtn", hasWallet && lockReleasable, lockReleasable ? "" : "Tidak ada token yang sudah rilis di lock — claim dulu, lalu tunggu vesting.");
-  set("closeBtn", hasWallet && monthEnded, monthEnded ? "" : "Bulan berjalan belum berakhir.");
 }
 
 const $ = id => document.getElementById(id);
-const fmtTok = raw => (Number(raw) / 1e6).toLocaleString("en-US", {maximumFractionDigits: 6});
+const fmtTok = raw => (Number(raw) / 1e6).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const fmtLam = lam => (Number(lam) / 1e9).toFixed(4) + " SOL";
 const short = pk => pk ? pk.toString().slice(0,4) + "…" + pk.toString().slice(-4) : "—";
 const solscan = sig => `https://solscan.io/tx/${sig}?cluster=devnet`;
@@ -1058,18 +1050,6 @@ async function doRecoverNft(){
     stuckNft = null;
     await refreshAll();
   }catch(e){ log("Recover NFT gagal: " + (e.message || e), "err"); }
-}
-
-async function doCloseMonth(){
-  if (!needProgram()) return;
-  try{
-    const vaultPda = pda([Buffer.from("vault")]);
-    const ix = await program.methods.closeMonth().accounts({
-      crank: walletPubkey, config: configPubkey, vault: vaultPda,
-      mint: configData.mint, tokenProgram: TOKEN_PROGRAM_ID
-    }).instruction();
-    await sendTx([ix], "Close Month");
-  }catch(e){ log("Close Month gagal: " + (e.message || e), "err"); }
 }
 
 // ---- Submit solve via the coordinator (alur ala Nonce / Kissat) ----
