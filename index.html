@@ -518,7 +518,16 @@ function gateButtons(){
   const lockExpired = staked && Number(minerData.lockUntil) <= now;
   const quota = hasMiner && configData ? (Number(minerData.tier) === 1 ? configData.quotaRegular : Number(minerData.tier) === 2 ? configData.quotaSpecial : configData.quotaHolder) : 0;
   const boosted = hasMiner && minerData.boosted;
-  const quotaLeft = hasMiner ? (quota + (boosted ? 1 : 0) - minerData.solvesToday) : 0;
+  // BUG KRITIS (ditemukan 2026-11-06 ~21:47): solvesToday on-chain TIDAK
+  // auto-reset saat ganti hari — program cuma reset saat submit
+  // (last_solve_day != today -> solves_today = 0). Kalau web pakai nilai
+  // mentah, di hari baru quotaLeft = kuota - solves_kemarin (mis. 8-10 =
+  // -2) dan tombol Submit MATI padahal kuota hari ini masih penuh — user
+  // deadlock (tidak bisa submit, dan solvesToday tidak reset tanpa submit).
+  // Samakan dengan program + koordinator: solvesToday efektif = 0 kalau
+  // lastSolveDay bukan hari ini (UTC).
+  const solvesToday = effectiveSolvesToday();
+  const quotaLeft = hasMiner ? (quota + (boosted ? 1 : 0) - solvesToday) : 0;
   const pending = hasMiner ? Number(minerData.pendingRewards) : 0;
   const lockReleasable = lockExists && lockData ? (Number(lockData.totalLocked) > Number(lockData.totalReleased)) : false;
   // Close Month: only after the current month rolled over.
@@ -547,6 +556,16 @@ const solscan = sig => `https://solscan.io/tx/${sig}?cluster=devnet`;
 // minimum is the larger of the yearly rule and the on-chain config value,
 // so the transaction never reverts with StakeTooSmall.
 function miningYear(){ return new Date().getUTCFullYear() - 2026 + 1; } // UTC, sama seperti program on-chain (unix_year)
+// Solve hari ini yang EFEKTIF (bukan nilai mentah on-chain): program reset
+// solves_today ke 0 saat submit kalau last_solve_day != hari ini (UTC).
+// Sebelum submit pertama di hari baru, nilai on-chain masih angka kemarin.
+// Web harus pakai logika yang sama, kalau tidak tombol Submit mati di hari
+// baru padahal kuota masih penuh (deadlock — lihat gateButtons).
+function effectiveSolvesToday(){
+  if (!minerData) return 0;
+  const today = Math.floor(Date.now() / 1000 / 86400);
+  return Number(minerData.lastSolveDay) === today ? Number(minerData.solvesToday) : 0;
+}
 function yearMinStakeTokens(){
   const yearly = miningYear() * 1000;
   const onchain = configData ? Number(configData.minStakeTokens) / 1e6 : 1000;
@@ -807,7 +826,7 @@ async function loadMiner(){
       row("Status", locked ? `<span class="pill off">Terkunci sampai ${lockUntil.toLocaleString("id-ID")}</span>` : `<span class="pill on">Bebas (lock habis)</span>`) +
       row("Token di-stake", fmtTok(m.stakedTokens) + " token") +
       row("NFT pass", m.stakedNft ? `<span class="mono">${short(m.stakedNft)}</span>` : "— (Holder)") +
-      row("Solve hari ini", m.solvesToday + " / " + (Number(m.tier) === 1 ? configData.quotaRegular : Number(m.tier) === 2 ? configData.quotaSpecial : configData.quotaHolder) + (m.boosted ? " (+1 staking)" : "")) +
+      row("Solve hari ini", effectiveSolvesToday() + " / " + (Number(m.tier) === 1 ? configData.quotaRegular : Number(m.tier) === 2 ? configData.quotaSpecial : configData.quotaHolder) + (m.boosted ? " (+1 staking)" : "")) +
       row("Total solve", m.totalSolves) +
       row("Reward pending", fmtTok(m.pendingRewards) + " token", Number(m.pendingRewards) > 0 ? "good" : "") +
       row("Utang fee submit", fmtLam(m.debtLamports), Number(m.debtLamports) > 0 ? "warn" : "") +
