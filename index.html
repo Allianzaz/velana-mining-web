@@ -1084,6 +1084,10 @@ async function fetchPuzzle(){
     currentPuzzle = {id: pj.puzzle_id, vars: pj.vars, clauses: pj.clauses, cnf: pj.cnf};
     $("puzzleId").textContent = "#" + pj.puzzle_id;
     renderPuzzleMeta(currentPuzzle);
+    // Puzzle baru = solusi lama tidak berlaku lagi. Kosongkan textarea
+    // assignment supaya user tidak submit solusi puzzle lama untuk puzzle
+    // baru (koordinator akan tolak INVALID_SOLUTION, tapi UI harus jelas).
+    const aIn = $("assignmentIn"); if (aIn) aIn.value = "";
     log(`Puzzle #${pj.puzzle_id}: ${pj.vars} variabel, ${pj.clauses} klausa. Download CNF lalu solve pakai Kissat di PC.`);
     return currentPuzzle;
   }catch(e){ log("Ambil puzzle gagal: " + (e.message || e), "err"); return null; }
