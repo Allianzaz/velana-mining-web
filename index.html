@@ -348,8 +348,9 @@ pako/dist/pako.esm.mjs:
         <option value="1">Regular — NFT pass</option>
         <option value="2">Special — NFT pass</option>
       </select>
-      <label>Jumlah token untuk di-stake (min. tahun ini: <span id="minStakeLbl">1.000</span>)</label>
-      <input id="stakeAmt" type="number" value="1000" min="0" step="1">
+      <label>Jumlah token untuk di-stake — <b>tetap</b> (min. tahun ini, tidak bisa diubah)</label>
+      <div class="mono" id="stakeAmtFixed" style="font-size:18px;padding:10px 12px;background:#0d1119;border:1px solid var(--line);border-radius:10px">1.000 token</div>
+      <div class="note" style="margin-top:6px">Aturan staking: tahun ke-<span id="miningYearLbl">1</span> minimum <span id="minStakeLbl">1.000</span> token — tiap tahun minimum naik 1.000 token (tahun 1 = 1.000, tahun 2 = 2.000, dst). Jumlah lebih atau kurang dari minimum akan ditolak program (revert), jadi web ini hanya mengizinkan jumlah yang tepat.</div>
       <label>NFT asset (mint address) — wajib untuk Regular/Special, kosongkan untuk Holder</label>
       <input id="nftAsset" type="text" placeholder="mint address NFT pass (opsional)">
       <div class="actions">
@@ -451,6 +452,22 @@ const fmtTok = raw => (Number(raw) / 1e6).toLocaleString("en-US", {maximumFracti
 const fmtLam = lam => (Number(lam) / 1e9).toFixed(4) + " SOL";
 const short = pk => pk ? pk.toString().slice(0,4) + "…" + pk.toString().slice(-4) : "—";
 const solscan = sig => `https://solscan.io/tx/${sig}?cluster=devnet`;
+// Mining year: the program launched in 2026 = year 1. Each calendar year the
+// minimum stake rises by 1,000 tokens (year Y = Y x 1,000). The effective
+// minimum is the larger of the yearly rule and the on-chain config value,
+// so the transaction never reverts with StakeTooSmall.
+function miningYear(){ return new Date().getFullYear() - 2026 + 1; }
+function yearMinStakeTokens(){
+  const yearly = miningYear() * 1000;
+  const onchain = configData ? Number(configData.minStakeTokens) / 1e6 : 1000;
+  return Math.max(yearly, onchain);
+}
+function refreshStakeLabels(){
+  const y = miningYear(), m = yearMinStakeTokens();
+  const yEl = $("miningYearLbl"); if (yEl) yEl.textContent = y;
+  const mEl = $("minStakeLbl"); if (mEl) mEl.textContent = m.toLocaleString("en-US");
+  const fEl = $("stakeAmtFixed"); if (fEl) fEl.textContent = m.toLocaleString("en-US") + " token";
+}
 function log(msg, cls){
   const el = $("log");
   const line = document.createElement("div");
@@ -514,6 +531,7 @@ async function loadConfig(){
       row("Mint token", `<span class="mono">${short(c.mint)}</span>`) +
       row("Koleksi Regular", `<span class="mono">${short(c.collectionRegular)}</span>`) +
       row("Koleksi Special", `<span class="mono">${short(c.collectionSpecial)}</span>`);
+    refreshStakeLabels();
     gateButtons();
   }catch(e){ $("progStatus").innerHTML = row("Config belum di-initialize di program ini", "—", "warn"); log("loadConfig gagal: " + (e.message||e), "err"); }
 }
@@ -602,7 +620,10 @@ async function sendTx(ixs, label){
 async function doStake(){
   if (!needProgram()) return;
   const tier = Number($("tierSel").value);
-  const amt = Math.round(Number($("stakeAmt").value) * 1e6);
+  // Fixed amount: the current year's minimum. No free choice — the program
+  // reverts (StakeTooSmall) below the minimum, and the design fixes the
+  // stake at exactly the yearly minimum.
+  const amt = Math.round(yearMinStakeTokens() * 1e6);
   const nftStr = $("nftAsset").value.trim();
   if (amt <= 0){ log("Jumlah stake harus > 0.", "err"); return; }
   if ((tier === 1 || tier === 2) && !nftStr){ log("Tier Regular/Special butuh NFT asset (mint address).", "err"); return; }
