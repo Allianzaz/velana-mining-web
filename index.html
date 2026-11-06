@@ -343,16 +343,28 @@ pako/dist/pako.esm.mjs:
   <div class="grid" style="grid-template-columns:1fr 1fr">
     <div>
       <label>Tier</label>
-      <select id="tierSel">
-        <option value="3">Holder — tanpa NFT</option>
+      <select id="tierSel" onchange="refreshStakeForm()">
+        <option value="3">Holder — tanpa NFT (stake token)</option>
         <option value="1">Regular — NFT pass</option>
         <option value="2">Special — NFT pass</option>
       </select>
-      <label>Jumlah token untuk di-stake — <b>tetap</b> (min. tahun ini, tidak bisa diubah)</label>
-      <div class="mono" id="stakeAmtFixed" style="font-size:18px;padding:10px 12px;background:#0d1119;border:1px solid var(--line);border-radius:10px">1.000 token</div>
-      <div class="note" style="margin-top:6px">Aturan staking: tahun ke-<span id="miningYearLbl">1</span> minimum <span id="minStakeLbl">1.000</span> token — tiap tahun minimum naik 1.000 token (tahun 1 = 1.000, tahun 2 = 2.000, dst). Jumlah lebih atau kurang dari minimum akan ditolak program (revert), jadi web ini hanya mengizinkan jumlah yang tepat.</div>
-      <label>NFT asset (mint address) — wajib untuk Regular/Special, kosongkan untuk Holder</label>
-      <input id="nftAsset" type="text" placeholder="mint address NFT pass (opsional)">
+      <div id="nftBox" style="display:none">
+        <label>NFT asset (mint address) — wajib untuk Regular/Special</label>
+        <input id="nftAsset" type="text" placeholder="mint address NFT pass">
+        <div class="note" id="nftBenefit"></div>
+      </div>
+      <div id="tokenBox">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="stakeTokenChk" onchange="refreshStakeForm()" style="width:auto">
+          <span id="tokenChkLbl">Stake token juga</span>
+        </label>
+        <div id="tokenAmtBox">
+          <label>Jumlah token untuk di-stake — <b>tetap</b> (min. tahun ini, tidak bisa diubah)</label>
+          <div class="mono" id="stakeAmtFixed" style="font-size:18px;padding:10px 12px;background:#0d1119;border:1px solid var(--line);border-radius:10px">1.000 token</div>
+        </div>
+        <div class="note" id="tokenBenefit"></div>
+      </div>
+      <div class="note" style="margin-top:6px">Aturan staking: tahun ke-<span id="miningYearLbl">1</span> minimum <span id="minStakeLbl">1.000</span> token — tiap tahun minimum naik 1.000 token (tahun 1 = 1.000, tahun 2 = 2.000, dst). <b>Bonus 10% berlaku untuk SEMUA staker</b> (NFT saja, NFT+token, maupun Holder) dan <b>tetap 10%</b> — tidak naik walau stake lebih banyak dari minimum.</div>
       <div class="actions">
         <button id="stakeBtn" class="green" onclick="doStake()" disabled>Stake</button>
         <button id="unstakeBtn" class="danger" onclick="doUnstake()" disabled>Unstake</button>
@@ -467,6 +479,41 @@ function refreshStakeLabels(){
   const yEl = $("miningYearLbl"); if (yEl) yEl.textContent = y;
   const mEl = $("minStakeLbl"); if (mEl) mEl.textContent = m.toLocaleString("en-US");
   const fEl = $("stakeAmtFixed"); if (fEl) fEl.textContent = m.toLocaleString("en-US") + " token";
+  refreshStakeForm();
+}
+// NFT dan token adalah dua menu terpisah. NFT tier (Regular/Special) bisa
+// stake NFT SAJA tanpa token (kuota dasar + bonus 10%); menambah stake token
+// (>= min. tahun ini) memberi +1 solve/hari. Holder WAJIB stake token
+// (tanpa NFT). Bonus 10% itu FLAT untuk semua staker — tidak naik walau
+// stake lebih banyak dari minimum.
+function refreshStakeForm(){
+  const tier = Number($("tierSel").value);
+  const chk = $("stakeTokenChk");
+  const nftBox = $("nftBox"), tokenAmtBox = $("tokenAmtBox");
+  const nftBen = $("nftBenefit"), tokBen = $("tokenBenefit"), chkLbl = $("tokenChkLbl");
+  const m = yearMinStakeTokens().toLocaleString("en-US");
+  if (tier === 3){
+    nftBox.style.display = "none";
+    chk.checked = true; chk.disabled = true;
+    chkLbl.textContent = "Stake token (wajib untuk Holder)";
+    tokenAmtBox.style.display = "";
+    tokBen.textContent = "Benefit Holder: 1 solve/hari + bonus reward 10% (2,2 token/solve). Token dikunci 1 bulan, tidak bisa unstake dini.";
+    nftBen.textContent = "";
+  } else {
+    nftBox.style.display = "";
+    chk.disabled = false;
+    const base = tier === 1 ? 4 : 8;
+    nftBen.textContent = (tier === 1 ? "Benefit Regular" : "Benefit Special") + " NFT saja: " + base + " solve/hari + bonus reward 10% (2,2 token/solve). NFT masuk escrow program, kembali saat unstake.";
+    if (chk.checked){
+      chkLbl.textContent = "Stake token juga (boost +1 solve/hari)";
+      tokenAmtBox.style.display = "";
+      tokBen.textContent = "Dengan stake " + m + " token: kuota naik jadi " + (base + 1) + " solve/hari. Bonus reward tetap 10% (tidak naik walau stake lebih banyak).";
+    } else {
+      chkLbl.textContent = "Stake token juga (boost +1 solve/hari)";
+      tokenAmtBox.style.display = "none";
+      tokBen.textContent = "Tanpa stake token: kuota tetap " + base + " solve/hari, bonus reward tetap 10%. Centang untuk tambah stake token dan dapat +1 solve/hari.";
+    }
+  }
 }
 function log(msg, cls){
   const el = $("log");
@@ -620,12 +667,13 @@ async function sendTx(ixs, label){
 async function doStake(){
   if (!needProgram()) return;
   const tier = Number($("tierSel").value);
-  // Fixed amount: the current year's minimum. No free choice — the program
-  // reverts (StakeTooSmall) below the minimum, and the design fixes the
-  // stake at exactly the yearly minimum.
-  const amt = Math.round(yearMinStakeTokens() * 1e6);
+  // NFT dan token terpisah: Holder WAJIB stake token (min. tahun ini).
+  // NFT tier boleh stake NFT SAJA (token 0, kuota dasar) atau NFT + token
+  // (min. tahun ini, kuota +1/hari). Program menerima token 0 untuk NFT
+  // tier (boosted=false, tidak ada transfer token).
+  const wantToken = tier === 3 || $("stakeTokenChk").checked;
+  const amt = wantToken ? Math.round(yearMinStakeTokens() * 1e6) : 0;
   const nftStr = $("nftAsset").value.trim();
-  if (amt <= 0){ log("Jumlah stake harus > 0.", "err"); return; }
   if ((tier === 1 || tier === 2) && !nftStr){ log("Tier Regular/Special butuh NFT asset (mint address).", "err"); return; }
   if (tier === 3 && nftStr){ log("Tier Holder tidak pakai NFT — kosongkan field NFT.", "err"); return; }
   try{
