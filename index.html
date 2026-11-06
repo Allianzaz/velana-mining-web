@@ -616,7 +616,8 @@ function refreshStakeForm(){
     chkRow.style.display = "none";
     chk.checked = true; chk.disabled = true;
     tokenAmtBox.style.display = "";
-    tokBen.textContent = "Benefit Holder: 1 solve/hari + bonus reward 10% (2,2 token/solve). Token dikunci 1 bulan, tidak bisa unstake dini.";
+    const holderQuota = configData ? Number(configData.quotaHolder) : 1;
+    tokBen.textContent = "Benefit Holder: " + holderQuota + " solve/hari + bonus reward 10% (2,2 token/solve). Token dikunci 1 bulan, tidak bisa unstake dini.";
     nftBen.textContent = "";
     // Token: hanya Stake + Unstake — Recover NFT itu khusus NFT, sembunyikan.
     $("unstakeBtn").style.display = "";
@@ -629,7 +630,9 @@ function refreshStakeForm(){
     // NFT: hanya Stake + Recover NFT — Unstake bukan di sini.
     $("unstakeBtn").style.display = "none";
     $("recoverBtn").style.display = "";
-    const base = tier === 1 ? 4 : 8;
+    // Kuota dari config on-chain (bukan hardcode) — config test: Regular 4,
+    // Special 8, Holder 10; config produksi: 4/8/1.
+    const base = tier === 1 ? (configData ? Number(configData.quotaRegular) : 4) : (configData ? Number(configData.quotaSpecial) : 8);
     nftBen.textContent = (tier === 1 ? "Benefit Regular" : "Benefit Special") + " NFT saja: " + base + " solve/hari + bonus reward 10% (2,2 token/solve). NFT masuk escrow program, kembali saat unstake.";
     if (chk.checked){
       chkLbl.textContent = "Stake token juga (boost +1 solve/hari)";
