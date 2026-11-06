@@ -1139,10 +1139,18 @@ async function doSubmit(){
       }
     }
     log(`Mengirim assignment puzzle #${pid} ke koordinator…`);
+    // Autentikasi (anti-griefing): tanda tangan request ini pakai wallet.
+    // Tanpa ini, siapa pun bisa submit solusi untuk wallet orang lain dan
+    // menghabiskan kuota harian korban. Pesan terikat ke (wallet, puzzle,
+    // nonce) — koordinator verifikasi signature sebelum proses.
+    const nonce = minerData ? minerData.nextNonce.toString() : "0";
+    const msg = `VENA-SUBMIT|${walletPubkey.toString()}|${pid}|${nonce}`;
+    const signed = await window.solana.signMessage(new TextEncoder().encode(msg), "utf8");
+    const signature = btoa(String.fromCharCode(...signed.signature));
     const sr = await fetch(`${COORDINATOR_URL}/submit`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({miner_wallet: walletPubkey.toString(), puzzle_id: pid, assignment})
+      body: JSON.stringify({miner_wallet: walletPubkey.toString(), puzzle_id: pid, assignment, signature})
     });
     const sj = await sr.json();
     if (!sr.ok) throw new Error("Koordinator menolak: " + (sj.error || sr.status) + (sj.detail ? " — " + sj.detail : ""));
