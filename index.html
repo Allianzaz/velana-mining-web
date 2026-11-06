@@ -516,7 +516,6 @@ function gateButtons(){
   const staked = hasMiner && Number(minerData.stakedTokens) > 0;
   const now = Math.floor(Date.now() / 1000);
   const lockExpired = staked && Number(minerData.lockUntil) <= now;
-  const hasNft = hasMiner && !!minerData.stakedNft;
   const quota = hasMiner && configData ? (Number(minerData.tier) === 1 ? configData.quotaRegular : Number(minerData.tier) === 2 ? configData.quotaSpecial : configData.quotaHolder) : 0;
   const boosted = hasMiner && minerData.boosted;
   const quotaLeft = hasMiner ? (quota + (boosted ? 1 : 0) - minerData.solvesToday) : 0;
@@ -531,7 +530,7 @@ function gateButtons(){
   const set = (id, enabled, why) => { const b = $(id); if (!b) return; b.disabled = !enabled; b.title = enabled ? "" : why; };
   set("stakeBtn", hasWallet && !staked, staked ? "Sudah ada stake aktif — Unstake dulu sebelum stake lagi." : "Hubungkan wallet dulu.");
   set("unstakeBtn", hasWallet && staked && lockExpired, !staked ? "Belum ada stake." : (!lockExpired ? "Stake masih terkunci sampai lock habis." : "Hubungkan wallet dulu."));
-  set("recoverBtn", hasWallet && hasNft, hasNft ? "" : "Tidak ada NFT yang di-stake.");
+  set("recoverBtn", hasWallet && !!stuckNft, stuckNft ? "" : "Tidak ada NFT yang stuck di escrow.");
   set("submitBtn", hasWallet && staked && !lockExpired && quotaLeft > 0, !staked ? "Stake dulu sebelum submit." : (lockExpired ? "Lock stake sudah habis — Unstake lalu Stake lagi." : (quotaLeft <= 0 ? "Kuota solve hari ini sudah habis." : "Hubungkan wallet dulu.")));
   set("claimBtn", hasWallet && pending > 0, pending > 0 ? "" : "Tidak ada reward pending — submit solve dulu.");
   set("wdBtn", hasWallet && lockReleasable, lockReleasable ? "" : "Tidak ada token yang sudah rilis di lock — claim dulu, lalu tunggu vesting.");
@@ -672,6 +671,40 @@ function onNftSelect(){
   else refreshStakeForm();
   log("NFT dipilih: " + nft.name + " (" + nft.id.slice(0, 8) + "…)", "ok");
 }
+// NFT yang stuck di escrow program (gagal balik saat unstake). Terdeteksi
+// OTOMATIS via DAS: cari Core asset milik miner PDA di koleksi Regular /
+// Special. 1 user = 1 NFT yang di-stake, jadi normalnya maksimal 1.
+// (Setelah unstake, miner.staked_nft sudah None — jadi tidak bisa baca dari
+// Miner account; yang dicari adalah NFT yang masih dimiliki miner PDA.)
+let stuckNft = null; // {id, name, tier} | null
+async function fetchStuckNft(){
+  stuckNft = null;
+  if (!walletPubkey || !configData) return;
+  try{
+    const minerPda = pda([Buffer.from("miner"), walletPubkey.toBuffer()]);
+    const reg = configData.collectionRegular.toString();
+    const spec = configData.collectionSpecial.toString();
+    const r = await fetch(RPC_URL, {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({jsonrpc: "2.0", id: 1, method: "getAssetsByOwner",
+        params: {ownerAddress: minerPda.toString(), page: 1, limit: 100}})});
+    const j = await r.json();
+    const items = (j.result && j.result.items) || [];
+    for (const it of items){
+      if (it.interface !== "MplCoreAsset") continue;
+      const g = (it.grouping || []).find(x => x.group_key === "collection");
+      const coll = g ? g.group_value : "";
+      if (coll !== reg && coll !== spec) continue;
+      const tier = coll === reg ? 1 : 2;
+      const name = (it.content && it.content.metadata && it.content.metadata.name) || ("Pass " + it.id.slice(0, 4));
+      stuckNft = {id: it.id, name, tier};
+      break; // 1 user = 1 NFT, ambil yang pertama
+    }
+    if (stuckNft) log("NFT stuck di escrow ketemu: " + stuckNft.name + " — klik Recover NFT.", "ok");
+  }catch(e){
+    log("Cek NFT stuck gagal: " + (e.message || e), "err");
+  }
+  gateButtons();
+}
 function log(msg, cls){
   const el = $("log");
   const line = document.createElement("div");
@@ -715,6 +748,7 @@ async function refreshAll(){
   await loadVault();
   if (walletPubkey) await loadMiner();
   if (walletPubkey) fetchMyNfts(false); // cari NFT pass otomatis (sekali; refresh via tombol 🔍)
+  if (walletPubkey) fetchStuckNft(); // cek NFT stuck di escrow (otomatis, untuk tombol Recover)
 }
 
 async function loadConfig(){
@@ -962,19 +996,23 @@ async function doUnstake(){
 
 async function doRecoverNft(){
   if (!needProgram()) return;
-  const nftStr = $("nftAsset").value.trim();
-  if (!nftStr){ log("Isi NFT asset (mint address) yang mau di-recover.", "err"); return; }
+  // NFT-nya terdeteksi otomatis (fetchStuckNft) — tidak perlu ketik manual.
+  // Kalau belum ketemu (mis. user klik sebelum refresh selesai), cari dulu.
+  if (!stuckNft) await fetchStuckNft();
+  if (!stuckNft){ log("Tidak ada NFT yang stuck di escrow — tidak ada yang perlu di-recover.", "err"); return; }
   try{
-    const asset = new solanaWeb3.PublicKey(nftStr);
+    const asset = new solanaWeb3.PublicKey(stuckNft.id);
     const minerPda = pda([Buffer.from("miner"), walletPubkey.toBuffer()]);
-    const m = await program.account.miner.fetch(minerPda);
     const ix = await program.methods.recoverNft(asset).accounts({
       minerWallet: walletPubkey, minerPda, config: configPubkey,
-      asset, collection: Number(m.tier) === 1 ? configData.collectionRegular : configData.collectionSpecial,
+      asset, collection: stuckNft.tier === 1 ? configData.collectionRegular : configData.collectionSpecial,
       mplCoreProgram: new solanaWeb3.PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"),
       systemProgram: solanaWeb3.SystemProgram.programId
     }).instruction();
     await sendTx([ix], "Recover NFT");
+    log("Recover NFT berhasil: " + stuckNft.name + " kembali ke wallet.", "ok");
+    stuckNft = null;
+    await refreshAll();
   }catch(e){ log("Recover NFT gagal: " + (e.message || e), "err"); }
 }
 
