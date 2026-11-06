@@ -385,7 +385,7 @@ pako/dist/pako.esm.mjs:
       <input id="nonceIn" type="number" value="0" min="0" step="1" disabled>
     </div>
   </div>
-  <div class="actions"><button class="green" id="submitBtn" onclick="doSubmit()">Solve + Submit via Koordinator</button></div>
+  <div class="actions"><button class="green" id="submitBtn" onclick="doSubmit()" disabled>Solve + Submit via Koordinator</button></div>
 </div>
 
 <div class="card">
@@ -413,6 +413,38 @@ const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey("ATokenGPvbdGVxr1b2
 const DECIMALS = 6;
 
 let connection, provider, program, walletPubkey = null, configPubkey = null, configData = null;
+let minerData = null, lockData = null, lockExists = false;
+
+// Disable action buttons that cannot succeed in the current state, so the
+// user gets a greyed-out button (with a reason in the log) instead of a
+// failed transaction. Called after every state refresh.
+function gateButtons(){
+  const hasWallet = !!walletPubkey;
+  const hasMiner = !!minerData;
+  const staked = hasMiner && Number(minerData.stakedTokens) > 0;
+  const now = Math.floor(Date.now() / 1000);
+  const lockExpired = staked && Number(minerData.lockUntil) <= now;
+  const hasNft = hasMiner && !!minerData.stakedNft;
+  const quota = hasMiner && configData ? (Number(minerData.tier) === 1 ? configData.quotaRegular : Number(minerData.tier) === 2 ? configData.quotaSpecial : configData.quotaHolder) : 0;
+  const boosted = hasMiner && minerData.boosted;
+  const quotaLeft = hasMiner ? (quota + (boosted ? 1 : 0) - minerData.solvesToday) : 0;
+  const pending = hasMiner ? Number(minerData.pendingRewards) : 0;
+  const lockReleasable = lockExists && lockData ? (Number(lockData.totalLocked) > Number(lockData.totalReleased)) : false;
+  // Close Month: only after the current month rolled over.
+  let monthEnded = false;
+  if (configData){
+    const monthStart = Number(configData.startMonth) + (Number(configData.currentMonth) - 1) * Number(configData.monthSecs);
+    monthEnded = now >= monthStart + Number(configData.monthSecs);
+  }
+  const set = (id, enabled, why) => { const b = $(id); if (!b) return; b.disabled = !enabled; b.title = enabled ? "" : why; };
+  set("stakeBtn", hasWallet && !staked, staked ? "Sudah ada stake aktif — Unstake dulu sebelum stake lagi." : "Hubungkan wallet dulu.");
+  set("unstakeBtn", hasWallet && staked && lockExpired, !staked ? "Belum ada stake." : (!lockExpired ? "Stake masih terkunci sampai lock habis." : "Hubungkan wallet dulu."));
+  set("recoverBtn", hasWallet && hasNft, hasNft ? "" : "Tidak ada NFT yang di-stake.");
+  set("submitBtn", hasWallet && staked && !lockExpired && quotaLeft > 0, !staked ? "Stake dulu sebelum submit." : (lockExpired ? "Lock stake sudah habis — Unstake lalu Stake lagi." : (quotaLeft <= 0 ? "Kuota solve hari ini sudah habis." : "Hubungkan wallet dulu.")));
+  set("claimBtn", hasWallet && pending > 0, pending > 0 ? "" : "Tidak ada reward pending — submit solve dulu.");
+  set("wdBtn", hasWallet && lockReleasable, lockReleasable ? "" : "Tidak ada token yang sudah rilis di lock — claim dulu, lalu tunggu vesting.");
+  set("closeBtn", hasWallet && monthEnded, monthEnded ? "" : "Bulan berjalan belum berakhir.");
+}
 
 const $ = id => document.getElementById(id);
 const fmtTok = raw => (Number(raw) / 1e6).toLocaleString("en-US", {maximumFractionDigits: 6});
@@ -453,7 +485,6 @@ async function connectWallet(){
     $("connectBtn").disabled = true;
     $("minerAddr").textContent = "— " + walletPubkey.toString();
     log("Wallet terhubung: " + walletPubkey.toString(), "ok");
-    ["stakeBtn","unstakeBtn","recoverBtn","claimBtn","wdBtn","closeBtn"].forEach(id => $(id).disabled = false);
     await refreshAll();
   }catch(e){ log("Gagal connect: " + (e.message || e), "err"); }
 }
@@ -483,6 +514,7 @@ async function loadConfig(){
       row("Mint token", `<span class="mono">${short(c.mint)}</span>`) +
       row("Koleksi Regular", `<span class="mono">${short(c.collectionRegular)}</span>`) +
       row("Koleksi Special", `<span class="mono">${short(c.collectionSpecial)}</span>`);
+    gateButtons();
   }catch(e){ $("progStatus").innerHTML = row("Config belum di-initialize di program ini", "—", "warn"); log("loadConfig gagal: " + (e.message||e), "err"); }
 }
 
@@ -507,6 +539,7 @@ async function loadMiner(){
   try{
     const minerPda = pda([Buffer.from("miner"), walletPubkey.toBuffer()]);
     const m = await program.account.miner.fetch(minerPda);
+    minerData = m;
     const tierName = {3:"Holder", 1:"Regular", 2:"Special"}[Number(m.tier)] || ("Tier " + m.tier);
     const lockUntil = new Date(Number(m.lockUntil) * 1000);
     const now = Date.now();
@@ -527,6 +560,7 @@ async function loadMiner(){
     try{
       const lockPda = pda([Buffer.from("lock"), walletPubkey.toBuffer()]);
       const l = await program.account.lockAccount.fetch(lockPda);
+      lockData = l; lockExists = true;
       const monthEnd = new Date(Number(l.monthEnd) * 1000);
       const released = Number(l.totalLocked) > 0 ? (Number(l.totalReleased)/Number(l.totalLocked)*100).toFixed(1) : "0";
       $("lockStatus").innerHTML = `<h2 style="margin-top:14px">🔒 Lock Rewards</h2>` +
@@ -534,10 +568,13 @@ async function loadMiner(){
         row("Sudah rilis", fmtTok(l.totalReleased) + " token (" + released + "%)") +
         row("Rilis penuh", monthEnd.toLocaleString("id-ID")) +
         row("Withdraw terakhir", l.lastWithdrawAt > 0 ? new Date(Number(l.lastWithdrawAt)*1000).toLocaleString("id-ID") : "—");
-    }catch(e){ $("lockStatus").innerHTML = `<div class="note">Belum ada lock rewards (claim dulu setelah solve).</div>`; }
+    }catch(e){ lockData = null; lockExists = false; $("lockStatus").innerHTML = `<div class="note">Belum ada lock rewards (claim dulu setelah solve).</div>`; }
+    gateButtons();
   }catch(e){
+    minerData = null; lockData = null; lockExists = false;
     $("minerStatus").innerHTML = row("Belum pernah stake", "Miner account belum ada — stake dulu untuk mulai.", "warn");
     $("lockStatus").innerHTML = "";
+    gateButtons();
   }
 }
 
@@ -653,7 +690,11 @@ async function doWithdraw(){
       const h = await importAtaHelper();
       ixs.push(h.createAssociatedTokenAccountInstruction(walletPubkey, tokenAcc, walletPubkey, configData.mint));
     }
-    const ix = await program.methods.withdraw(new anchor.BN(amt)).accounts({
+    // BUG FIX: amount 0 means "withdraw all" in the UI, but the program
+    // takes Option<u64> — Some(0) means "withdraw exactly 0 tokens"
+    // (tx succeeds, moves nothing). Pass null (= None) for "all".
+    const amtArg = amt === 0 ? null : new anchor.BN(amt);
+    const ix = await program.methods.withdraw(amtArg).accounts({
       minerWallet: walletPubkey, miner: minerPda, lock: lockPda, lockVault,
       minerTokenAccount: tokenAcc, config: configPubkey,
       treasury: configData.treasury, lpFund: configData.lpFund,
