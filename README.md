@@ -9,8 +9,8 @@ Single-file web UI for the Velana mining program on **Solana devnet**.
 
 - Connects Phantom (devnet) and reads live program state: Config, Vault, Miner, Lock.
 - Actions: Stake, Claim, Withdraw, Unstake, Recover NFT, Close Month.
+- **Submit Solve is wired to the coordinator** — fetches a puzzle from `velana-coordinator.fly.dev`, solves it in-browser with a DPLL solver, and the coordinator verifies + submits on-chain. See `ARCHITECTURE.md` for the full offchain + onchain flow.
 - Local 3-SAT puzzle practice (generator + DPLL solver).
-- **Submit is disabled** — mining submit needs a coordinator attestation, and the coordinator is not built yet.
 
 ## Program (devnet)
 
