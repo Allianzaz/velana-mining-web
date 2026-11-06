@@ -362,7 +362,7 @@ pako/dist/pako.esm.mjs:
         <div class="note" id="nftBenefit"></div>
       </div>
       <div id="tokenBox">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <label id="tokenChkRow" style="display:flex;align-items:center;gap:8px;cursor:pointer">
           <input type="checkbox" id="stakeTokenChk" onchange="refreshStakeForm()" style="width:auto">
           <span id="tokenChkLbl">Stake token juga</span>
         </label>
@@ -515,20 +515,23 @@ function setNftTier(t){
 function refreshStakeForm(){
   const tier = currentTier();
   const chk = $("stakeTokenChk");
+  const chkRow = $("tokenChkRow");
   const nftBox = $("nftBox"), nftTierSeg = $("nftTierSeg"), tokenAmtBox = $("tokenAmtBox");
   const nftBen = $("nftBenefit"), tokBen = $("tokenBenefit"), chkLbl = $("tokenChkLbl");
   const m = yearMinStakeTokens().toLocaleString("en-US");
   if (tier === 3){
     nftBox.style.display = "none";
     nftTierSeg.style.display = "none";
+    // Holder: token wajib, tidak ada pilihan — sembunyikan ceklisnya.
+    chkRow.style.display = "none";
     chk.checked = true; chk.disabled = true;
-    chkLbl.textContent = "Stake token (wajib untuk Holder)";
     tokenAmtBox.style.display = "";
     tokBen.textContent = "Benefit Holder: 1 solve/hari + bonus reward 10% (2,2 token/solve). Token dikunci 1 bulan, tidak bisa unstake dini.";
     nftBen.textContent = "";
   } else {
     nftBox.style.display = "";
     nftTierSeg.style.display = "";
+    chkRow.style.display = "";
     chk.disabled = false;
     const base = tier === 1 ? 4 : 8;
     nftBen.textContent = (tier === 1 ? "Benefit Regular" : "Benefit Special") + " NFT saja: " + base + " solve/hari + bonus reward 10% (2,2 token/solve). NFT masuk escrow program, kembali saat unstake.";
