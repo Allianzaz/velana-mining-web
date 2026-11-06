@@ -457,8 +457,8 @@ pako/dist/pako.esm.mjs:
 
   <section class="card">
     <h2><span class="br">[MINE]</span>Submit Solve <span class="pill on">Koordinator Aktif</span></h2>
-    <label>Puzzle ID</label>
-    <input id="puzzleId" type="number" value="1" min="1" max="100" step="1">
+    <label>Puzzle (otomatis — yang belum pernah di-submit)</label>
+    <div id="puzzleId" class="mono" style="padding:10px 0">—</div>
     <label>Nonce</label>
     <input id="nonceIn" type="number" value="0" min="0" step="1" disabled>
     <div class="actions">
@@ -509,7 +509,11 @@ let minerData = null, lockData = null, lockExists = false;
 function gateButtons(){
   const hasWallet = !!walletPubkey;
   const hasMiner = !!minerData;
-  const staked = hasMiner && Number(minerData.stakedTokens) > 0;
+  // "Staked" = tier != 0 (bukan stakedTokens > 0): stake NFT-only punya
+  // stakedTokens 0 tapi tier 1/2 dan tetap valid untuk submit. Pakai
+  // stakedTokens > 0 membuat tombol Submit/Unstake mati untuk semua
+  // staker NFT-only (bug: user tier Special, 0 token, tombol ngadat).
+  const staked = hasMiner && Number(minerData.tier) !== 0;
   const now = Math.floor(Date.now() / 1000);
   const lockExpired = staked && Number(minerData.lockUntil) <= now;
   const quota = hasMiner && configData ? (Number(minerData.tier) === 1 ? configData.quotaRegular : Number(minerData.tier) === 2 ? configData.quotaSpecial : configData.quotaHolder) : 0;
@@ -678,6 +682,11 @@ function onNftSelect(){
 // Special. 1 user = 1 NFT yang di-stake, jadi normalnya maksimal 1.
 // (Setelah unstake, miner.staked_nft sudah None — jadi tidak bisa baca dari
 // Miner account; yang dicari adalah NFT yang masih dimiliki miner PDA.)
+// PENTING: NFT yang AKTIF di-stake juga dimiliki miner PDA — itu BUKAN
+// stuck, jangan ditandai. Hanya NFT yang dimiliki PDA tapi BUKAN
+// staked_nft saat ini yang stuck (sisa dari unstake yang gagal
+// mengembalikan NFT). Tanpa filter ini, tombol Recover nyala padahal
+// NFT-nya lagi di-stake, dan recover_nft ditolak program (NftStillStaked).
 let stuckNft = null; // {id, name, tier} | null
 async function fetchStuckNft(){
   stuckNft = null;
@@ -686,6 +695,7 @@ async function fetchStuckNft(){
     const minerPda = pda([Buffer.from("miner"), walletPubkey.toBuffer()]);
     const reg = configData.collectionRegular.toString();
     const spec = configData.collectionSpecial.toString();
+    const activeNft = (minerData && minerData.stakedNft) ? minerData.stakedNft.toString() : null;
     const r = await fetch(RPC_URL, {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({jsonrpc: "2.0", id: 1, method: "getAssetsByOwner",
         params: {ownerAddress: minerPda.toString(), page: 1, limit: 100}})});
@@ -693,6 +703,7 @@ async function fetchStuckNft(){
     const items = (j.result && j.result.items) || [];
     for (const it of items){
       if (it.interface !== "MplCoreAsset") continue;
+      if (activeNft && it.id === activeNft) continue; // lagi di-stake, bukan stuck
       const g = (it.grouping || []).find(x => x.group_key === "collection");
       const coll = g ? g.group_value : "";
       if (coll !== reg && coll !== spec) continue;
@@ -999,7 +1010,10 @@ async function doRecoverNft(){
       mplCoreProgram: new solanaWeb3.PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"),
       systemProgram: solanaWeb3.SystemProgram.programId
     }).instruction();
-    await sendTx([ix], "Recover NFT");
+    // sendTx return null kalau gagal (sudah log "gagal" sendiri) — JANGAN
+    // log "berhasil" kalau begitu, itu pesan sukses palsu.
+    const sig = await sendTx([ix], "Recover NFT");
+    if (!sig) return;
     log("Recover NFT berhasil: " + stuckNft.name + " kembali ke wallet.", "ok");
     stuckNft = null;
     await refreshAll();
@@ -1026,13 +1040,7 @@ async function doCloseMonth(){
 //    verifikasi lokal di web ini — koordinator yang memverifikasi.
 let currentPuzzle = null; // {id, vars, clauses, cnf}
 
-function puzzleIdVal(){
-  let pid = parseInt($("puzzleId").value, 10);
-  if (!pid || pid < 1) pid = 1;
-  if (pid > 100) pid = 100;
-  $("puzzleId").value = pid;
-  return pid;
-}
+// (Puzzle ID input manual dihapus — puzzle kini auto-assign via /puzzle/assign.)
 
 function renderPuzzleMeta(p){
   $("puzzleMeta").innerHTML =
@@ -1042,27 +1050,31 @@ function renderPuzzleMeta(p){
 }
 
 async function fetchPuzzle(){
+  if (!walletPubkey){ log("Connect Phantom dulu.", "err"); return null; }
   try{
-    const pid = puzzleIdVal();
-    log(`Mengambil puzzle #${pid} dari koordinator…`);
-    const pr = await fetch(`${COORDINATOR_URL}/puzzle/${pid}`);
-    if (!pr.ok) throw new Error("Koordinator tidak merespons (HTTP " + pr.status + ")");
+    log(`Mengambil puzzle (otomatis — yang belum pernah di-submit) dari koordinator…`);
+    const pr = await fetch(`${COORDINATOR_URL}/puzzle/assign?wallet=${walletPubkey.toString()}`);
     const pj = await pr.json();
-    currentPuzzle = {id: pid, vars: pj.vars, clauses: pj.clauses, cnf: pj.cnf};
+    if (!pr.ok){
+      if (pr.status === 409) throw new Error("Semua 100 puzzle sudah di-submit wallet ini — pool perlu ditambah.");
+      throw new Error("Koordinator tidak merespons (HTTP " + pr.status + "): " + (pj.detail || pj.error || ""));
+    }
+    currentPuzzle = {id: pj.puzzle_id, vars: pj.vars, clauses: pj.clauses, cnf: pj.cnf};
+    $("puzzleId").textContent = "#" + pj.puzzle_id;
     renderPuzzleMeta(currentPuzzle);
-    log(`Puzzle #${pid}: ${pj.vars} variabel, ${pj.clauses} klausa. Download CNF lalu solve pakai Kissat di PC.`);
+    log(`Puzzle #${pj.puzzle_id}: ${pj.vars} variabel, ${pj.clauses} klausa. Download CNF lalu solve pakai Kissat di PC.`);
     return currentPuzzle;
   }catch(e){ log("Ambil puzzle gagal: " + (e.message || e), "err"); return null; }
 }
 
 async function downloadCnf(){
   try{
-    const pid = puzzleIdVal();
-    let p = (currentPuzzle && currentPuzzle.id === pid) ? currentPuzzle : null;
+    let p = currentPuzzle;
     if (!p){
       p = await fetchPuzzle();
       if (!p) return;
     }
+    const pid = p.id;
     const blob = new Blob([p.cnf], {type: "text/plain"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1087,9 +1099,10 @@ function parseAssignment(text){
 
 async function doSubmit(){
   if (!walletPubkey){ log("Connect Phantom dulu.", "err"); return; }
+  if (!currentPuzzle){ log("Ambil puzzle dulu (otomatis) sebelum submit.", "err"); return; }
   const btn = $("submitBtn"); btn.disabled = true;
   try{
-    const pid = puzzleIdVal();
+    const pid = currentPuzzle.id;
     const assignment = parseAssignment($("assignmentIn").value);
     if (!assignment.length) throw new Error("Assignment kosong — paste hasil solve Kissat dulu.");
     // Cek format saja (jumlah + jangkauan angka), bukan kebenaran solusi.
