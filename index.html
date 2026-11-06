@@ -473,6 +473,7 @@ pako/dist/pako.esm.mjs:
       <button type="button" class="ghost" onclick="fetchPuzzle()">Ambil Puzzle</button>
       <button type="button" class="ghost" onclick="downloadCnf()">Download CNF</button>
     </div>
+    <div id="seedNote" class="dim" style="font-size:12px;margin-top:6px"></div>
     <div id="puzzleMeta" style="margin-top:12px"><div class="row"><span class="k">Puzzle</span><span class="v dim">—</span></div></div>
     <label style="margin-top:12px">Assignment</label>
     <textarea id="assignmentIn" placeholder="1 -2 3 -4 ..."></textarea>
@@ -1052,34 +1053,235 @@ async function doRecoverNft(){
   }catch(e){ log("Recover NFT gagal: " + (e.message || e), "err"); }
 }
 
+// ==== Seed-based puzzle: CNF dibuat lokal dari seed (ChaCha20) ====
+// Desain: LAPORAN-DISTRIBUSI-PUZZLE-SEED.md + quiet_planted.py
+// (~/workspace/velana-mining/puzzle-factory/seed-design/).
+// Struktur klausa (3 variabel/klausa) diturunkan dari seed publik via
+// ChaCha20 RFC 8439; polaritas (3 bit/klausa, base64) dikirim server.
+// Klien TIDAK PERNAH tahu planted solution — hanya generate CNF lalu
+// solve dengan Kissat seperti biasa. Endpoint baru: GET
+// /puzzle/seed-assign + POST /submit-seed. Kalau endpoint baru belum
+// live (404/error), alur otomatis fallback ke jalur file-CNF lama
+// (/puzzle/assign + /submit) — jalur lama TIDAK diubah.
+function _rotl32(v, n){ return ((v << n) | (v >>> (32 - n))) >>> 0; }
+function _chachaQR(w, a, b, c, d){
+  w[a] = (w[a] + w[b]) >>> 0; w[d] ^= w[a]; w[d] = _rotl32(w[d], 16);
+  w[c] = (w[c] + w[d]) >>> 0; w[b] ^= w[c]; w[b] = _rotl32(w[b], 12);
+  w[a] = (w[a] + w[b]) >>> 0; w[d] ^= w[a]; w[d] = _rotl32(w[d], 8);
+  w[c] = (w[c] + w[d]) >>> 0; w[b] ^= w[c]; w[b] = _rotl32(w[b], 7);
+}
+// Satu blok ChaCha20 64-byte (RFC 8439). keyBytes32 = 32 byte,
+// nonceBytes12 = 12 byte, counter = u32. Cocok dengan chacha20_block()
+// di quiet_planted.py (verifikasi: self-test di bawah).
+function chacha20Block(keyBytes32, counter, nonceBytes12){
+  if (!keyBytes32 || keyBytes32.length !== 32) throw new Error("ChaCha20: key harus 32 byte");
+  if (!nonceBytes12 || nonceBytes12.length !== 12) throw new Error("ChaCha20: nonce harus 12 byte");
+  const kd = new DataView(keyBytes32.buffer, keyBytes32.byteOffset, 32);
+  const nd = new DataView(nonceBytes12.buffer, nonceBytes12.byteOffset, 12);
+  const st = new Uint32Array(16);
+  st[0] = 0x61707865; st[1] = 0x3320646e; st[2] = 0x79622d32; st[3] = 0x6b206574;
+  for (let i = 0; i < 8; i++) st[4 + i] = kd.getUint32(i * 4, true);
+  st[12] = counter >>> 0;
+  for (let i = 0; i < 3; i++) st[13 + i] = nd.getUint32(i * 4, true);
+  const w = new Uint32Array(st);
+  for (let r = 0; r < 10; r++){
+    _chachaQR(w, 0, 4, 8, 12); _chachaQR(w, 1, 5, 9, 13);
+    _chachaQR(w, 2, 6, 10, 14); _chachaQR(w, 3, 7, 11, 15);
+    _chachaQR(w, 0, 5, 10, 15); _chachaQR(w, 1, 6, 11, 12);
+    _chachaQR(w, 2, 7, 8, 13); _chachaQR(w, 3, 4, 9, 14);
+  }
+  const out = new Uint8Array(64);
+  const od = new DataView(out.buffer);
+  for (let i = 0; i < 16; i++) od.setUint32(i * 4, (w[i] + st[i]) >>> 0, true);
+  return out;
+}
+// PRNG deterministik dari keystream ChaCha20 (nonce 12 byte nol,
+// counter mulai 0) — sama seperti ChaCha20RNG di quiet_planted.py.
+function makeChaChaRng(keyBytes32){
+  if (!keyBytes32 || keyBytes32.length !== 32) throw new Error("ChaCha20RNG: key harus 32 byte");
+  return {key: keyBytes32, counter: 0, buf: new Uint8Array(0), pos: 0};
+}
+function chacha20NextU32(st){
+  if (st.pos + 4 > st.buf.length){
+    st.buf = chacha20Block(st.key, st.counter, new Uint8Array(12));
+    st.counter = (st.counter + 1) >>> 0;
+    st.pos = 0;
+  }
+  const v = (st.buf[st.pos] | (st.buf[st.pos + 1] << 8) | (st.buf[st.pos + 2] << 16) | (st.buf[st.pos + 3] << 24)) >>> 0;
+  st.pos += 4;
+  return v;
+}
+// Rejection sampling tanpa bias modulo — sama seperti randbelow Python.
+function chacha20RandBelow(st, n){
+  if (!(n > 0)) throw new Error("randbelow: n harus > 0");
+  const limit = 4294967296 - (4294967296 % n);
+  for (;;){
+    const v = chacha20NextU32(st);
+    if (v < limit) return v % n;
+  }
+}
+function hexToBytes(hex){
+  const h = String(hex).trim().toLowerCase();
+  if (!/^[0-9a-f]+$/.test(h) || h.length % 2 !== 0) throw new Error("seed hex tidak valid");
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+function bytesToHex(bytes){
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, "0");
+  return s;
+}
+function base64ToBytes(b64){
+  const norm = String(b64).trim().replace(/-/g, "+").replace(/_/g, "/");
+  const padded = norm + "=".repeat((4 - (norm.length % 4)) % 4);
+  const bin = atob(padded);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+// Normalisasi seed dari koordinator ke 32 byte: 64-hex langsung,
+// base64 32-byte, atau teks bebas -> SHA-256 (sama seperti parse_seed
+// Python). Dipakai di fetchPuzzle; generator di bawah menerima hex saja.
+async function seedToBytes(seed){
+  if (typeof seed !== "string" || !seed.trim()) throw new Error("seed kosong dari koordinator");
+  const s = seed.trim();
+  if (/^[0-9a-fA-F]{64}$/.test(s)) return hexToBytes(s);
+  try{ const b = base64ToBytes(s); if (b.length === 32) return b; }catch(e){ /* bukan base64, lanjut */ }
+  if (typeof crypto !== "undefined" && crypto.subtle){
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+    return new Uint8Array(digest);
+  }
+  throw new Error("seed bukan 64-hex dan SHA-256 tidak tersedia");
+}
+// Struktur klausa dari seed publik — HARUS cocok persis dengan
+// gen_structure_from_seed() Python: untuk tiap klausa sample 3 variabel
+// berbeda (urutan draw: a, b, c) dari ChaCha20(seed).
+function structureFromSeed(seedHex, nVars, nClauses){
+  const rng = makeChaChaRng(hexToBytes(seedHex));
+  const out = new Array(nClauses);
+  for (let i = 0; i < nClauses; i++){
+    const a = chacha20RandBelow(rng, nVars) + 1;
+    let b = chacha20RandBelow(rng, nVars - 1) + 1;
+    if (b >= a) b += 1;
+    let c = chacha20RandBelow(rng, nVars - 2) + 1;
+    const mn = Math.min(a, b), mx = Math.max(a, b);
+    if (c >= mn) c += 1;
+    if (c >= mx) c += 1;
+    out[i] = [a, b, c];
+  }
+  return out;
+}
+// Gabungkan struktur (dari seed) + polaritas (base64, 3 bit/klausa,
+// MSB-first, 1 = positif) -> string DIMACS. Sama seperti
+// reconstruct_cnf() + write_dimacs() Python.
+function cnfFromSeed(seedHex, polBase64, nVars, nClauses){
+  const triples = structureFromSeed(seedHex, nVars, nClauses);
+  const pol = base64ToBytes(polBase64);
+  const lines = new Array(nClauses + 1);
+  lines[0] = "p cnf " + nVars + " " + nClauses;
+  for (let i = 0; i < nClauses; i++){
+    const vs = triples[i];
+    let line = "";
+    for (let j = 0; j < 3; j++){
+      const bitPos = 3 * i + j;
+      const byte = pol[bitPos >> 3] || 0;
+      const bit = (byte >> (7 - (bitPos & 7))) & 1;
+      line += (bit ? vs[j] : -vs[j]) + " ";
+    }
+    lines[i + 1] = line + "0";
+  }
+  return lines.join("\n") + "\n";
+}
+// Self-test ChaCha20 saat load: test vector terverifikasi PyCryptodome
+// (key=bytes(range(32)), nonce=00..004a..00, counter=1) — sama seperti
+// test_chacha20() di quiet_planted.py. Gagal = error keras di console,
+// web tetap jalan (jalur file-CNF lama tidak bergantung pada ini).
+(function seedSelfTest(){
+  try{
+    const key = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) key[i] = i;
+    const nonce = hexToBytes("000000000000004a00000000");
+    const got = bytesToHex(chacha20Block(key, 1, nonce));
+    const want = "224f51f3401bd9e12fde276fb8631ded8c131f823d2c06e27e4fcaec9ef3cf788a3b0aa372600a92b57974cded2b9334794cba40c63e34cdea212c4cf07d41b7";
+    console.assert(got === want, "[VENA seed] ChaCha20 test vector FAILED");
+    if (got === want) console.info("[VENA seed] ChaCha20 test vector OK");
+    else console.error("[VENA seed] FATAL: ChaCha20 test vector FAILED — generate CNF lokal dari seed TIDAK BOLEH dipakai");
+  }catch(e){ console.error("[VENA seed] ChaCha20 self-test error:", e); }
+})();
+// ==== Akhir blok seed-based puzzle ====
+
 // ---- Submit solve via the coordinator (alur ala Nonce / Kissat) ----
 // 1) Ambil Puzzle: fetch metadata dari koordinator (GET /puzzle/:id).
 // 2) Download CNF: unduh file .cnf, solve pakai Kissat di PC.
 // 3) Paste assignment ke textarea, Submit: POST ke koordinator yang
 //    memverifikasi + submit on-chain. TIDAK ada solver dan TIDAK ada
 //    verifikasi lokal di web ini — koordinator yang memverifikasi.
-let currentPuzzle = null; // {id, vars, clauses, cnf}
+let currentPuzzle = null; // {id, vars, clauses, cnf} jalur lama, atau {id, vars, clauses, seed, polarities, seedBased:true, issuedAt, expiresAt} jalur seed
 
 // (Puzzle ID input manual dihapus — puzzle kini auto-assign via /puzzle/assign.)
 
 function renderPuzzleMeta(p){
-  $("puzzleMeta").innerHTML =
-    `<div class="row"><span class="k">Puzzle</span><span class="v">#${p.id}</span></div>` +
+  let html =
+    `<div class="row"><span class="k">Puzzle</span><span class="v">#${p.id}${p.seedBased ? " (seed)" : ""}</span></div>` +
     `<div class="row"><span class="k">Variabel</span><span class="v">${p.vars}</span></div>` +
     `<div class="row"><span class="k">Klausa</span><span class="v">${p.clauses}</span></div>`;
+  if (p.seedBased){
+    html += `<div class="row"><span class="k">Seed</span><span class="v mono">${String(p.seed).slice(0, 12)}…</span></div>`;
+    if (p.expiresAt){
+      const t = typeof p.expiresAt === "number" ? (p.expiresAt < 1e12 ? p.expiresAt * 1000 : p.expiresAt) : Date.parse(p.expiresAt);
+      const exp = new Date(t);
+      html += `<div class="row"><span class="k">Berlaku s.d.</span><span class="v">${isNaN(exp.getTime()) ? p.expiresAt : exp.toLocaleString("id-ID")}</span></div>`;
+    }
+  }
+  $("puzzleMeta").innerHTML = html;
+  const note = $("seedNote");
+  if (note) note.textContent = p.seedBased ? "Seed-based: CNF dibuat lokal dari seed (hemat bandwidth)" : "";
 }
 
 async function fetchPuzzle(){
   if (!walletPubkey){ log("Connect Phantom dulu.", "err"); return null; }
   try{
     log(`Mengambil puzzle (otomatis — yang belum pernah di-submit) dari koordinator…`);
+    // 1) Jalur seed-based baru dulu: GET /puzzle/seed-assign.
+    //    Belum live (404) atau error apa pun -> fallback ke jalur lama.
+    try{
+      const sr = await fetch(`${COORDINATOR_URL}/puzzle/seed-assign?wallet=${walletPubkey.toString()}`);
+      if (sr.ok){
+        const sj = await sr.json();
+        const seedBytes = await seedToBytes(sj.seed);
+        currentPuzzle = {
+          id: sj.puzzle_id ?? sj.id,
+          vars: sj.vars ?? sj.n_vars,
+          clauses: sj.clauses ?? sj.n_clauses,
+          seed: bytesToHex(seedBytes),
+          polarities: sj.polarities ?? sj.polarity ?? sj.pol,
+          seedBased: true,
+          issuedAt: sj.issued_at ?? sj.issuedAt ?? null,
+          expiresAt: sj.expires_at ?? sj.expiresAt ?? null,
+        };
+        if (!currentPuzzle.id || !currentPuzzle.vars || !currentPuzzle.clauses || !currentPuzzle.polarities)
+          throw new Error("respons seed-assign tidak lengkap");
+        $("puzzleId").textContent = "#" + currentPuzzle.id + " (seed)";
+        renderPuzzleMeta(currentPuzzle);
+        const aIn = $("assignmentIn"); if (aIn) aIn.value = "";
+        log(`Puzzle #${currentPuzzle.id} (seed): ${currentPuzzle.vars} variabel, ${currentPuzzle.clauses} klausa. CNF dibuat lokal dari seed — Download CNF lalu solve pakai Kissat di PC.`);
+        return currentPuzzle;
+      }
+      if (sr.status !== 404) log(`Seed-assign belum tersedia (HTTP ${sr.status}), fallback ke jalur file-CNF…`, "dim");
+    }catch(e){
+      // 404 / error jaringan / respons tidak lengkap: fallback diam-diam
+      // ke jalur lama di bawah (yang menentukan gagal/tidak).
+      log("Seed-assign belum tersedia, fallback ke jalur file-CNF…", "dim");
+    }
+    // 2) Jalur file-CNF lama (TIDAK diubah): GET /puzzle/assign.
     const pr = await fetch(`${COORDINATOR_URL}/puzzle/assign?wallet=${walletPubkey.toString()}`);
     const pj = await pr.json();
     if (!pr.ok){
       if (pr.status === 409) throw new Error("Semua 100 puzzle sudah di-submit wallet ini — pool perlu ditambah.");
       throw new Error("Koordinator tidak merespons (HTTP " + pr.status + "): " + (pj.detail || pj.error || ""));
     }
-    currentPuzzle = {id: pj.puzzle_id, vars: pj.vars, clauses: pj.clauses, cnf: pj.cnf};
+    currentPuzzle = {id: pj.puzzle_id, vars: pj.vars, clauses: pj.clauses, cnf: pj.cnf, seedBased: false};
     $("puzzleId").textContent = "#" + pj.puzzle_id;
     renderPuzzleMeta(currentPuzzle);
     // Puzzle baru = solusi lama tidak berlaku lagi. Kosongkan textarea
@@ -1099,7 +1301,17 @@ async function downloadCnf(){
       if (!p) return;
     }
     const pid = p.id;
-    const blob = new Blob([p.cnf], {type: "text/plain"});
+    // Seed-based: generate CNF lokal dari seed + polaritas (tanpa
+    // download file). Jalur lama: pakai CNF dari /puzzle/assign.
+    let cnfText;
+    if (p.seedBased){
+      const t0 = performance.now();
+      cnfText = cnfFromSeed(p.seed, p.polarities, p.vars, p.clauses);
+      log(`CNF puzzle #${pid} dibuat lokal dari seed (${Math.round(performance.now() - t0)} ms, ${p.clauses} klausa).`, "dim");
+    } else {
+      cnfText = p.cnf;
+    }
+    const blob = new Blob([cnfText], {type: "text/plain"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1152,10 +1364,15 @@ async function doSubmit(){
     const msg = `VENA-SUBMIT|${walletPubkey.toString()}|${pid}|${nonce}`;
     const signed = await window.solana.signMessage(new TextEncoder().encode(msg), "utf8");
     const signature = btoa(String.fromCharCode(...signed.signature));
-    const sr = await fetch(`${COORDINATOR_URL}/submit`, {
+    // Seed-based: POST /submit-seed (+ seed). Jalur lama: POST /submit.
+    // Pesan tanda tangan VENA-SUBMIT sama di kedua jalur.
+    const submitUrl = currentPuzzle.seedBased ? `${COORDINATOR_URL}/submit-seed` : `${COORDINATOR_URL}/submit`;
+    const submitBody = {miner_wallet: walletPubkey.toString(), puzzle_id: pid, assignment, signature};
+    if (currentPuzzle.seedBased) submitBody.seed = currentPuzzle.seed;
+    const sr = await fetch(submitUrl, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({miner_wallet: walletPubkey.toString(), puzzle_id: pid, assignment, signature})
+      body: JSON.stringify(submitBody)
     });
     const sj = await sr.json();
     if (!sr.ok) throw new Error("Koordinator menolak: " + (sj.error || sr.status) + (sj.detail ? " — " + sj.detail : ""));
