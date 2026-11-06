@@ -415,8 +415,6 @@ pako/dist/pako.esm.mjs:
 
   <section class="card">
     <h2><span class="br">[CLAIM]</span>Claim &amp; Withdraw</h2>
-    <label>Withdraw</label>
-    <input id="wdAmt" type="number" value="0" min="0" step="1">
     <div class="actions">
       <button id="claimBtn" onclick="doClaim()" disabled>Claim → Lock</button>
       <button id="wdBtn" onclick="doWithdraw()" disabled>Withdraw</button>
@@ -984,7 +982,8 @@ async function doClaim(){
 
 async function doWithdraw(){
   if (!needProgram()) return;
-  const amt = Math.round(Number($("wdAmt").value) * 1e6);
+  // Withdraw selalu tarik semua yang sudah unlock (input jumlah dihapus — v30).
+  const amtArg = null;
   try{
     const minerPda = pda([Buffer.from("miner"), walletPubkey.toBuffer()]);
     const lockPda = pda([Buffer.from("lock"), walletPubkey.toBuffer()]);
@@ -996,10 +995,7 @@ async function doWithdraw(){
       const h = await importAtaHelper();
       ixs.push(h.createAssociatedTokenAccountInstruction(walletPubkey, tokenAcc, walletPubkey, configData.mint));
     }
-    // BUG FIX: amount 0 means "withdraw all" in the UI, but the program
-    // takes Option<u64> — Some(0) means "withdraw exactly 0 tokens"
-    // (tx succeeds, moves nothing). Pass null (= None) for "all".
-    const amtArg = amt === 0 ? null : new anchor.BN(amt);
+    // Withdraw selalu "all": program terima Option<u64>, null (= None) = tarik semua.
     const ix = await program.methods.withdraw(amtArg).accounts({
       minerWallet: walletPubkey, miner: minerPda, lock: lockPda, lockVault,
       minerTokenAccount: tokenAcc, config: configPubkey,
