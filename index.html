@@ -414,6 +414,17 @@ pako/dist/pako.esm.mjs:
   </section>
 
   <section class="card">
+    <h2><span class="br">[CLAIM]</span>Claim &amp; Withdraw</h2>
+    <label>Withdraw</label>
+    <input id="wdAmt" type="number" value="0" min="0" step="1">
+    <div class="actions">
+      <button id="claimBtn" onclick="doClaim()" disabled>Claim → Lock</button>
+      <button id="wdBtn" onclick="doWithdraw()" disabled>Withdraw</button>
+      <button id="closeBtn" class="ghost" onclick="doCloseMonth()" disabled>Close Month</button>
+    </div>
+  </section>
+
+  <section class="card">
     <h2><span class="br">[STAKE]</span>Stake</h2>
     <label>Stake apa?</label>
     <div class="seg" id="stakeModeSeg">
@@ -469,17 +480,6 @@ pako/dist/pako.esm.mjs:
     <label style="margin-top:12px">Assignment</label>
     <textarea id="assignmentIn" placeholder="1 -2 3 -4 ..."></textarea>
     <div class="actions"><button class="green" id="submitBtn" onclick="doSubmit()" disabled>Submit via Koordinator</button></div>
-  </section>
-
-  <section class="card">
-    <h2><span class="br">[CLAIM]</span>Claim &amp; Withdraw</h2>
-    <label>Withdraw</label>
-    <input id="wdAmt" type="number" value="0" min="0" step="1">
-    <div class="actions">
-      <button id="claimBtn" onclick="doClaim()" disabled>Claim → Lock</button>
-      <button id="wdBtn" onclick="doWithdraw()" disabled>Withdraw</button>
-      <button id="closeBtn" class="ghost" onclick="doCloseMonth()" disabled>Close Month</button>
-    </div>
   </section>
 
   <section class="card">
