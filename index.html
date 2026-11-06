@@ -385,7 +385,7 @@ pako/dist/pako.esm.mjs:
     <nav class="nav">
       <a href="#" class="on">Mining</a>
       <a href="https://vena-mint.fly.dev/" target="_blank" rel="noopener">Mint</a>
-      <a href="#faucet-card">Faucet</a>
+      <a href="https://vena-faucet.fly.dev" target="_blank" rel="noopener">Faucet</a>
       <a href="https://vena-docs.fly.dev" target="_blank" rel="noopener">Docs</a>
     </nav>
     <span class="spacer"></span>
@@ -486,14 +486,6 @@ pako/dist/pako.esm.mjs:
     </div>
   </section>
 
-  <section class="card" id="faucet-card">
-    <h2><span class="br">[FAUCET]</span>Faucet Devnet</h2>
-    <div class="actions">
-      <button id="faucetBtn" class="green" onclick="doFaucet()" disabled>Klaim 1.000 VENA</button>
-    </div>
-    <div class="note" id="faucetStatus">—</div>
-  </section>
-
   <section class="card">
     <h2><span class="br">[LOG]</span>Log Transaksi</h2>
     <div id="log">—</div>
@@ -543,7 +535,6 @@ function gateButtons(){
   set("submitBtn", hasWallet && staked && !lockExpired && quotaLeft > 0, !staked ? "Stake dulu sebelum submit." : (lockExpired ? "Lock stake sudah habis — Unstake lalu Stake lagi." : (quotaLeft <= 0 ? "Kuota solve hari ini sudah habis." : "Hubungkan wallet dulu.")));
   set("claimBtn", hasWallet && pending > 0, pending > 0 ? "" : "Tidak ada reward pending — submit solve dulu.");
   set("wdBtn", hasWallet && lockReleasable, lockReleasable ? "" : "Tidak ada token yang sudah rilis di lock — claim dulu, lalu tunggu vesting.");
-  set("faucetBtn", hasWallet, "Hubungkan wallet dulu untuk klaim faucet.");
   set("closeBtn", hasWallet && monthEnded, monthEnded ? "" : "Bulan berjalan belum berakhir.");
 }
 
@@ -893,34 +884,6 @@ async function importAtaHelper(){
       return new solanaWeb3.TransactionInstruction({keys, programId: ATP, data: Buffer.alloc(0)});
     }
   };
-}
-
-// Faucet devnet: 1.000 VENA/hari per alamat, dilayani koordinator
-// (POST /faucet). Koordinator yang memegang dana faucet + membayar fee.
-async function doFaucet(){
-  if (!walletPubkey){ log("Hubungkan wallet dulu.", "err"); return; }
-  const st = $("faucetStatus");
-  try{
-    if (st) st.textContent = "Meminta 1.000 VENA ke koordinator…";
-    const r = await fetch(`${COORDINATOR_URL}/faucet`, {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ wallet: walletPubkey.toString() })
-    });
-    const j = await r.json();
-    if (!r.ok){
-      const msg = j.error === "ALREADY_CLAIMED" ? j.detail : (j.detail || j.error || "Faucet gagal");
-      if (st) st.textContent = msg;
-      log("Faucet: " + msg, "err");
-      return;
-    }
-    if (st) st.textContent = `✅ 1.000 VENA masuk! Tx: ${j.signature.slice(0, 12)}… — klaim lagi setelah ${new Date(j.next_claim_at).toLocaleString("id-ID")}.`;
-    log(`Faucet: +1.000 VENA (tx ${j.signature.slice(0, 16)}…)`, "ok");
-    await refreshAll();
-  }catch(e){
-    const msg = "Faucet gagal: " + (e.message || e);
-    if (st) st.textContent = msg;
-    log(msg, "err");
-  }
 }
 
 async function doClaim(){
