@@ -456,7 +456,7 @@ const solscan = sig => `https://solscan.io/tx/${sig}?cluster=devnet`;
 // minimum stake rises by 1,000 tokens (year Y = Y x 1,000). The effective
 // minimum is the larger of the yearly rule and the on-chain config value,
 // so the transaction never reverts with StakeTooSmall.
-function miningYear(){ return new Date().getFullYear() - 2026 + 1; }
+function miningYear(){ return new Date().getUTCFullYear() - 2026 + 1; } // UTC, sama seperti program on-chain (unix_year)
 function yearMinStakeTokens(){
   const yearly = miningYear() * 1000;
   const onchain = configData ? Number(configData.minStakeTokens) / 1e6 : 1000;
