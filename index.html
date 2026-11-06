@@ -384,21 +384,21 @@ pako/dist/pako.esm.mjs:
     <a class="logo" href="#">vena<span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></a>
     <nav class="nav">
       <a href="#" class="on">Mining</a>
-      <a href="https://velana-mint.fly.dev/" target="_blank" rel="noopener">Mint</a>
+      <a href="https://vena-mint.fly.dev/" target="_blank" rel="noopener">Mint</a>
       <a href="#faucet-card">Faucet</a>
+      <a href="https://vena-docs.fly.dev" target="_blank" rel="noopener">Docs</a>
     </nav>
     <span class="spacer"></span>
     <button id="connectBtn" class="btn-cyan" onclick="connectWallet()">Connect Phantom</button>
   </div>
 </header>
 <main class="wrap">
-  <div class="strip"><span class="br">[</span><span>// MINE VENA — SOLVE REAL 3-SAT PUZZLES, EARN ON-CHAIN</span><span class="br">]</span></div>
+  <div class="strip"><span class="br">[</span><span>// MINE VENA</span><span class="br">]</span></div>
 
   <section class="hero">
     <div class="kicker">[MINING]</div>
     <h1>Mine VENA <span class="badge">Solana Devnet</span></h1>
-    <p class="sub">Solve real 3-SAT puzzles with Kissat on your PC, submit the assignment through the coordinator, and earn VENA on-chain. No solver in the browser — real compute, real proof.</p>
-    <p class="meta">Program: <a id="progLink" href="#" target="_blank" rel="noopener">AirHpAYsRh1DKDWXL6oRy9kgrhBnLbqta8jgNnhBKMre</a> &middot; Token: 6 desimal &middot; Reward 2 token / solve &middot; Bonus staking +10% &middot; RPC: api.devnet.solana.com</p>
+    <p class="meta">Program: <a id="progLink" href="#" target="_blank" rel="noopener">AirHpAYsRh1DKDWXL6oRy9kgrhBnLbqta8jgNnhBKMre</a></p>
   </section>
 
   <section class="card">
@@ -413,7 +413,7 @@ pako/dist/pako.esm.mjs:
 
   <section class="card">
     <h2><span class="br">[MINER]</span>Miner Saya <span id="minerAddr" class="mono dim"></span></h2>
-    <div id="minerStatus"><div class="row"><span class="k">Hubungkan wallet untuk melihat status miner kamu.</span><span class="v dim">—</span></div></div>
+    <div id="minerStatus"><div class="row"><span class="k">—</span><span class="v dim">—</span></div></div>
     <div id="lockStatus"></div>
   </section>
 
@@ -429,15 +429,15 @@ pako/dist/pako.esm.mjs:
       <button type="button" id="tabSpec" onclick="setNftTier(2)">Special — 8/hari</button>
     </div>
     <div id="nftBox" style="display:none">
-      <label>NFT pass kamu — pilih, otomatis terisi (tidak perlu ketik manual)</label>
+      <label>NFT Pass</label>
       <div style="display:flex;gap:8px">
         <select id="nftSelect" style="flex:1;background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:0;padding:10px 12px;font-size:14px" onchange="onNftSelect()">
           <option value="">— pilih NFT pass —</option>
         </select>
         <button type="button" class="ghost" onclick="fetchMyNfts(true)" title="Cari ulang NFT di wallet">Cari NFT</button>
       </div>
-      <div class="note" id="nftPickNote"><span class="dim">Hubungkan wallet — NFT pass kamu akan dicari otomatis.</span></div>
-      <label style="margin-top:8px">atau masukkan manual (mint address)</label>
+      <div class="note" id="nftPickNote"><span class="dim">—</span></div>
+      <label style="margin-top:8px">Mint address</label>
       <input id="nftAsset" type="text" placeholder="mint address NFT pass">
       <div class="note" id="nftBenefit"></div>
     </div>
@@ -447,62 +447,56 @@ pako/dist/pako.esm.mjs:
         <span id="tokenChkLbl">Stake token juga</span>
       </label>
       <div id="tokenAmtBox">
-        <label>Jumlah token untuk di-stake — <b>tetap</b> (min. tahun ini, tidak bisa diubah)</label>
+        <label>Jumlah token — min. tahun <span id="miningYearLbl">1</span>: <span id="minStakeLbl">1.000</span></label>
         <div class="mono" id="stakeAmtFixed" style="font-size:18px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:0">1.000 token</div>
       </div>
       <div class="note" id="tokenBenefit"></div>
     </div>
-    <div class="note" style="margin-top:6px">Aturan staking: tahun ke-<span id="miningYearLbl">1</span> minimum <span id="minStakeLbl">1.000</span> token — tiap tahun minimum naik 1.000 token (tahun 1 = 1.000, tahun 2 = 2.000, dst). <b>Bonus 10% berlaku untuk SEMUA staker</b> (NFT saja, NFT+token, maupun Holder) dan <b>tetap 10%</b> — tidak naik walau stake lebih banyak dari minimum.</div>
     <div class="actions">
       <button id="stakeBtn" class="green" onclick="doStake()" disabled>Stake</button>
       <button id="unstakeBtn" class="danger" onclick="doUnstake()" disabled>Unstake</button>
       <button id="recoverBtn" class="ghost" onclick="doRecoverNft()" disabled>Recover NFT</button>
     </div>
-    <div class="note">Stake mengunci token + NFT pass (kalau ada) selama <b>1 bulan kalender</b>. Tidak ada unstake dini. NFT pass masuk escrow program dan kembali saat unstake. Holder tier cukup stake token, tanpa NFT.</div>
   </section>
 
   <section class="card">
     <h2><span class="br">[MINE]</span>Submit Solve <span class="pill on">Koordinator Aktif</span></h2>
-    <div class="note" style="margin-top:0">Alur mining ala Nonce: ambil puzzle dari koordinator (<span class="mono">velana-coordinator.fly.dev</span>), download file CNF-nya, pecahkan pakai <b>Kissat di PC kamu</b>, lalu paste assignment ke bawah dan submit. Koordinator memverifikasi assignment + menandatangani attestasi, lalu mengirim transaksi <b>submit</b> on-chain pakai nonce kamu. Reward masuk ke pending miner. Pastikan wallet sudah <b>stake</b> dulu dan kuota harian belum habis.</div>
-    <label>Puzzle ID (1–100, dari koordinator)</label>
+    <label>Puzzle ID</label>
     <input id="puzzleId" type="number" value="1" min="1" max="100" step="1">
-    <label>Nonce (harus sama dengan next_nonce miner kamu)</label>
+    <label>Nonce</label>
     <input id="nonceIn" type="number" value="0" min="0" step="1" disabled>
     <div class="actions">
       <button type="button" class="ghost" onclick="fetchPuzzle()">Ambil Puzzle</button>
       <button type="button" class="ghost" onclick="downloadCnf()">Download CNF</button>
     </div>
-    <div id="puzzleMeta" style="margin-top:12px"><div class="row"><span class="k">Puzzle</span><span class="v dim">Belum diambil — klik "Ambil Puzzle".</span></div></div>
-    <label style="margin-top:12px">Assignment — paste hasil solve Kissat dari PC</label>
-    <textarea id="assignmentIn" placeholder="Contoh: 1 -2 3 -4 5 ... (satu angka per variabel, pisahkan dengan spasi)"></textarea>
-    <div class="note">Solve pakai Kissat di PC, lalu paste assignment di sini. Jangan submit assignment yang salah — koordinator akan menolak.</div>
+    <div id="puzzleMeta" style="margin-top:12px"><div class="row"><span class="k">Puzzle</span><span class="v dim">—</span></div></div>
+    <label style="margin-top:12px">Assignment</label>
+    <textarea id="assignmentIn" placeholder="1 -2 3 -4 ..."></textarea>
     <div class="actions"><button class="green" id="submitBtn" onclick="doSubmit()" disabled>Submit via Koordinator</button></div>
   </section>
 
   <section class="card">
     <h2><span class="br">[CLAIM]</span>Claim &amp; Withdraw</h2>
-    <label>Withdraw — jumlah token dari lock (0 = semua yang sudah rilis)</label>
+    <label>Withdraw</label>
     <input id="wdAmt" type="number" value="0" min="0" step="1">
     <div class="actions">
       <button id="claimBtn" onclick="doClaim()" disabled>Claim → Lock</button>
       <button id="wdBtn" onclick="doWithdraw()" disabled>Withdraw</button>
       <button id="closeBtn" class="ghost" onclick="doCloseMonth()" disabled>Close Month</button>
     </div>
-    <div class="note">Claim memindahkan reward pending ke lock (30 hari window, lewat dari itu hangus dibakar). Withdraw dari lock: kalau &lt; 5 hari sejak withdraw terakhir, kena <b>pajak 5% (dibakar)</b>. Close Month itu permissionless — siapa pun bisa menutup bulan &amp; membakar sisa kuota.</div>
   </section>
 
   <section class="card" id="faucet-card">
-    <h2><span class="br">[FAUCET]</span>Faucet Devnet — 1.000 VENA / hari</h2>
-    <div class="note" style="margin-top:0">Butuh token buat coba staking? Klaim <b>1.000 VENA gratis per hari per alamat</b> (cukup buat stake Holder 1 bulan). Faucet ini khusus devnet/simulasi — di mainnet tidak ada faucet.</div>
+    <h2><span class="br">[FAUCET]</span>Faucet Devnet</h2>
     <div class="actions">
       <button id="faucetBtn" class="green" onclick="doFaucet()" disabled>Klaim 1.000 VENA</button>
     </div>
-    <div class="note" id="faucetStatus">Hubungkan wallet untuk klaim faucet.</div>
+    <div class="note" id="faucetStatus">—</div>
   </section>
 
   <section class="card">
     <h2><span class="br">[LOG]</span>Log Transaksi</h2>
-    <div id="log">Belum ada aktivitas. Hubungkan wallet dulu.</div>
+    <div id="log">—</div>
   </section>
 </main>
 <footer class="foot">
@@ -665,7 +659,7 @@ async function fetchMyNfts(force){
       myNfts.map(x => `<option value="${x.id}">${x.name} (${x.tier === 1 ? "Regular" : "Special"}) — ${x.id.slice(0, 4)}…${x.id.slice(-4)}</option>`).join("");
     if (prev && myNfts.some(x => x.id === prev)) sel.value = prev;
     if (!myNfts.length){
-      if (note) note.innerHTML = 'Belum ada NFT pass di wallet ini. <a href="https://velana-mint.fly.dev/" target="_blank" rel="noopener">Mint dulu di velana-mint.fly.dev</a> (Regular $1 / Special $2).';
+      if (note) note.innerHTML = 'Belum ada NFT pass di wallet ini. <a href="https://vena-mint.fly.dev/" target="_blank" rel="noopener">Mint dulu di vena-mint.fly.dev</a> (Regular $1 / Special $2).';
       log("Tidak ada NFT pass VENA di wallet ini.", "err");
     } else {
       if (note) note.innerHTML = `<span class="ok">✅ Ketemu ${myNfts.length} NFT pass — pilih salah satu di atas.</span>`;
