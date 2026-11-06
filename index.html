@@ -403,6 +403,11 @@ pako/dist/pako.esm.mjs:
   </section>
 
   <section class="card">
+    <h2><span class="br">[VAULT]</span>Vault &amp; Bulan Ini</h2>
+    <div id="vaultStatus"><div class="row"><span class="k">Memuat…</span><span class="v dim">—</span></div></div>
+  </section>
+
+  <section class="card">
     <h2><span class="br">[MINER]</span>Miner Saya <span id="minerAddr" class="mono dim"></span></h2>
     <div id="minerStatus"><div class="row"><span class="k">—</span><span class="v dim">—</span></div></div>
     <div id="lockStatus"></div>
@@ -742,6 +747,7 @@ async function connectWallet(){
 
 async function refreshAll(){
   await loadConfig();
+  await loadVault();
   if (walletPubkey) await loadMiner();
   if (walletPubkey) fetchMyNfts(false); // cari NFT pass otomatis (sekali; refresh via tombol 🔍)
   if (walletPubkey) fetchStuckNft(); // cek NFT stuck di escrow (otomatis, untuk tombol Recover)
@@ -751,11 +757,29 @@ async function loadConfig(){
   // Config tetap dibaca (untuk kuota, koleksi, min stake, dll) tapi TIDAK
   // lagi ditampilkan di web ini — status program pindah ke mainpage
   // (vena-main.fly.dev) supaya web mining tidak terlalu kompleks.
+  // Vault TETAP di web mining (info mining: saldo, cap, terpakai, pending).
   try{
     configData = await program.account.config.fetch(configPubkey);
     refreshStakeLabels();
     gateButtons();
   }catch(e){ log("loadConfig gagal: " + (e.message||e), "err"); }
+}
+
+async function loadVault(){
+  try{
+    if (!configData) return;
+    const vaultPda = pda([Buffer.from("vault")]);
+    const bal = await connection.getTokenAccountBalance(vaultPda);
+    const c = configData;
+    const remaining = Math.max(0, Number(c.monthlyCap) - Number(c.usedThisMonth));
+    $("vaultStatus").innerHTML =
+      row("Saldo vault", fmtTok(bal.value.amount) + " token", "good") +
+      row("Monthly cap", fmtTok(c.monthlyCap) + " token") +
+      row("Terpakai bulan ini", fmtTok(c.usedThisMonth) + " token") +
+      row("Sisa kuota bulan ini", fmtTok(remaining) + " token", remaining > 0 ? "good" : "bad") +
+      row("Total pending (belum di-claim)", fmtTok(c.totalPending) + " token") +
+      row("Vault PDA", `<span class="mono">${short(vaultPda)}</span>`);
+  }catch(e){ $("vaultStatus").innerHTML = row("Gagal baca vault", "—", "bad"); }
 }
 
 async function loadMiner(){
@@ -1092,7 +1116,7 @@ async function doSubmit(){
     if (!sr.ok) throw new Error("Koordinator menolak: " + (sj.error || sr.status) + (sj.detail ? " — " + sj.detail : ""));
     log(`🎉 Submit BERHASIL! Puzzle #${sj.puzzle_id}, nonce ${sj.nonce}, reward pending ${fmtTok(sj.pending_rewards * 1e6)} token, solve hari ini ${sj.solves_today}. Tx: ${sj.signature}`, "ok");
     log("Solscan: " + sj.solscan, "ok");
-    await loadMiner();
+    await loadMiner(); await loadVault();
   }catch(e){ log("Submit gagal: " + (e.message || e), "err"); }
   finally{ btn.disabled = false; }
 }
@@ -1107,6 +1131,7 @@ async function doSubmit(){
     configPubkey = pda([Buffer.from("config")]);
     $("progLink").href = "https://solscan.io/account/" + PROGRAM_ID.toString() + "?cluster=devnet";
     await loadConfig();
+    await loadVault();
     log("Program status dimuat (read-only). Hubungkan Phantom untuk aksi.", "dim");
   }catch(e){ log("Gagal muat status program: " + (e.message || e), "err"); }
 })();
