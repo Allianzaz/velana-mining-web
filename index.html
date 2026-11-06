@@ -599,11 +599,17 @@ function refreshStakeForm(){
     tokenAmtBox.style.display = "";
     tokBen.textContent = "Benefit Holder: 1 solve/hari + bonus reward 10% (2,2 token/solve). Token dikunci 1 bulan, tidak bisa unstake dini.";
     nftBen.textContent = "";
+    // Token: hanya Stake + Unstake — Recover NFT itu khusus NFT, sembunyikan.
+    $("unstakeBtn").style.display = "";
+    $("recoverBtn").style.display = "none";
   } else {
     nftBox.style.display = "";
     nftTierSeg.style.display = "";
     chkRow.style.display = "";
     chk.disabled = false;
+    // NFT: hanya Stake + Recover NFT — Unstake bukan di sini.
+    $("unstakeBtn").style.display = "none";
+    $("recoverBtn").style.display = "";
     const base = tier === 1 ? 4 : 8;
     nftBen.textContent = (tier === 1 ? "Benefit Regular" : "Benefit Special") + " NFT saja: " + base + " solve/hari + bonus reward 10% (2,2 token/solve). NFT masuk escrow program, kembali saat unstake.";
     if (chk.checked){
