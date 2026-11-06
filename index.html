@@ -566,6 +566,22 @@ function effectiveSolvesToday(){
   const today = Math.floor(Date.now() / 1000 / 86400);
   return Number(minerData.lastSolveDay) === today ? Number(minerData.solvesToday) : 0;
 }
+// Baris tenggat klaim untuk [MINER]: hitung dari pending_since + claim
+// window (config). Kalau pending 0 atau pending_since 0, tidak ada tenggat.
+function claimDeadlineRow(m){
+  if (!m || Number(m.pendingRewards) <= 0 || Number(m.pendingSince) <= 0 || !configData) return "";
+  const windowSecs = Number(configData.claimWindowSecs);
+  const deadlineMs = (Number(m.pendingSince) + windowSecs) * 1000;
+  const leftMs = deadlineMs - Date.now();
+  if (leftMs <= 0){
+    return row("Tenggat klaim", `<span class="bad">KEDALUWARSA — klaim sekarang akan membakar reward ini</span>`, "bad");
+  }
+  const s = Math.floor(leftMs / 1000);
+  const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+  const txt = hh > 0 ? `${hh}j ${String(mm).padStart(2,"0")}m` : `${mm}:${String(ss).padStart(2,"0")}`;
+  const urgent = leftMs < 60 * 1000; // < 1 menit: peringatan keras
+  return row("Tenggat klaim", `<span class="${urgent ? "bad" : "warn"}">${txt} lagi — klaim sebelum hangus</span>`, urgent ? "bad" : "warn");
+}
 function yearMinStakeTokens(){
   const yearly = miningYear() * 1000;
   const onchain = configData ? Number(configData.minStakeTokens) / 1e6 : 1000;
@@ -832,6 +848,12 @@ async function loadMiner(){
       row("Solve hari ini", effectiveSolvesToday() + " / " + (Number(m.tier) === 1 ? configData.quotaRegular : Number(m.tier) === 2 ? configData.quotaSpecial : configData.quotaHolder) + (m.boosted ? " (+1 staking)" : "")) +
       row("Total solve", m.totalSolves) +
       row("Reward pending", fmtTok(m.pendingRewards) + " token", Number(m.pendingRewards) > 0 ? "good" : "") +
+      // Tenggat klaim: reward pending hangus kalau tidak diklaim dalam
+      // claim_window_secs sejak pending_since (terakhir solve). Tampilkan
+      // countdown supaya user tidak kehilangan reward tanpa sadar (bug
+      // laporan user: 0,034375 VENA hangus karena UI tidak menunjukkan
+      // tenggat). Devnet: 600 dtk (10 mnt); produksi: 30 hari.
+      claimDeadlineRow(m) +
       row("Utang fee submit", fmtLam(m.debtLamports), Number(m.debtLamports) > 0 ? "warn" : "") +
       row("Next nonce", m.nextNonce.toString()) +
       row("Miner PDA", `<span class="mono">${short(minerPda)}</span>`);
