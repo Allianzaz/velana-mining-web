@@ -312,6 +312,11 @@ pako/dist/pako.esm.mjs:
   .actions button{flex:1 1 140px}
   #puzzle{font-family:ui-monospace,Menlo,monospace;font-size:13px;background:#0d1119;border:1px solid var(--line);border-radius:10px;padding:12px;white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto}
   .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .seg{display:flex;background:#0d1119;border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px;margin:6px 0 10px}
+  .seg button{flex:1;background:transparent;color:var(--mut);border:none;border-radius:9px;padding:10px 8px;font-size:14px;font-weight:600;cursor:pointer;margin:0}
+  .seg button.on{background:var(--acc);color:#fff}
+  .seg button.on.green{background:var(--acc2);color:#04231c}
+  .seg.small button{padding:7px 6px;font-size:13px}
 </style>
 </head>
 <body>
@@ -342,12 +347,15 @@ pako/dist/pako.esm.mjs:
   <h2>⚡ Aksi</h2>
   <div class="grid" style="grid-template-columns:1fr 1fr">
     <div>
-      <label>Tier</label>
-      <select id="tierSel" onchange="refreshStakeForm()">
-        <option value="3">Holder — tanpa NFT (stake token)</option>
-        <option value="1">Regular — NFT pass</option>
-        <option value="2">Special — NFT pass</option>
-      </select>
+      <label>Stake apa?</label>
+      <div class="seg" id="stakeModeSeg">
+        <button type="button" id="tabNft" class="on" onclick="setStakeMode('nft')">🎫 NFT Pass</button>
+        <button type="button" id="tabToken" onclick="setStakeMode('token')">🪙 Token (Holder)</button>
+      </div>
+      <div id="nftTierSeg" class="seg small" style="display:none">
+        <button type="button" id="tabReg" class="on" onclick="setNftTier(1)">Regular — 4/hari</button>
+        <button type="button" id="tabSpec" onclick="setNftTier(2)">Special — 8/hari</button>
+      </div>
       <div id="nftBox" style="display:none">
         <label>NFT asset (mint address) — wajib untuk Regular/Special</label>
         <input id="nftAsset" type="text" placeholder="mint address NFT pass">
@@ -486,14 +494,33 @@ function refreshStakeLabels(){
 // (>= min. tahun ini) memberi +1 solve/hari. Holder WAJIB stake token
 // (tanpa NFT). Bonus 10% itu FLAT untuk semua staker — tidak naik walau
 // stake lebih banyak dari minimum.
+// Stake mode dipilih lewat tab kiri-kanan (seperti Solscan): "NFT Pass" atau
+// "Token (Holder)". Di dalam NFT ada sub-tab Regular/Special. Tier program
+// diturunkan dari pilihan ini (Holder=3, Regular=1, Special=2).
+let stakeMode = "nft"; // "nft" | "token"
+let nftTier = 1; // 1 = Regular, 2 = Special (hanya saat stakeMode "nft")
+function currentTier(){ return stakeMode === "token" ? 3 : nftTier; }
+function setStakeMode(mode){
+  stakeMode = mode;
+  $("tabNft").classList.toggle("on", mode === "nft");
+  $("tabToken").classList.toggle("on", mode === "token");
+  refreshStakeForm();
+}
+function setNftTier(t){
+  nftTier = t;
+  $("tabReg").classList.toggle("on", t === 1);
+  $("tabSpec").classList.toggle("on", t === 2);
+  refreshStakeForm();
+}
 function refreshStakeForm(){
-  const tier = Number($("tierSel").value);
+  const tier = currentTier();
   const chk = $("stakeTokenChk");
-  const nftBox = $("nftBox"), tokenAmtBox = $("tokenAmtBox");
+  const nftBox = $("nftBox"), nftTierSeg = $("nftTierSeg"), tokenAmtBox = $("tokenAmtBox");
   const nftBen = $("nftBenefit"), tokBen = $("tokenBenefit"), chkLbl = $("tokenChkLbl");
   const m = yearMinStakeTokens().toLocaleString("en-US");
   if (tier === 3){
     nftBox.style.display = "none";
+    nftTierSeg.style.display = "none";
     chk.checked = true; chk.disabled = true;
     chkLbl.textContent = "Stake token (wajib untuk Holder)";
     tokenAmtBox.style.display = "";
@@ -501,6 +528,7 @@ function refreshStakeForm(){
     nftBen.textContent = "";
   } else {
     nftBox.style.display = "";
+    nftTierSeg.style.display = "";
     chk.disabled = false;
     const base = tier === 1 ? 4 : 8;
     nftBen.textContent = (tier === 1 ? "Benefit Regular" : "Benefit Special") + " NFT saja: " + base + " solve/hari + bonus reward 10% (2,2 token/solve). NFT masuk escrow program, kembali saat unstake.";
@@ -666,7 +694,7 @@ async function sendTx(ixs, label){
 
 async function doStake(){
   if (!needProgram()) return;
-  const tier = Number($("tierSel").value);
+  const tier = currentTier();
   // NFT dan token terpisah: Holder WAJIB stake token (min. tahun ini).
   // NFT tier boleh stake NFT SAJA (token 0, kuota dasar) atau NFT + token
   // (min. tahun ini, kuota +1/hari). Program menerima token 0 untuk NFT
