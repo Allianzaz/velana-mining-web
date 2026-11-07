@@ -366,10 +366,19 @@ pako/dist/pako.esm.mjs:
 
   /* ---- footer ---- */
   footer.foot{max-width:1120px;margin:8px auto 0;padding:16px 20px 40px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-family:'JetBrains Mono','Space Mono',ui-monospace,monospace;font-size:12px;color:var(--dim)}
+  .menu-btn{display:none}
   @media(max-width:700px){
     .hero h1{font-size:32px}
-    .site-in{gap:14px;height:auto;min-height:76px;flex-wrap:wrap;padding-top:10px;padding-bottom:10px}
-    nav.nav a{padding:6px 8px}
+    /* (m11) Header mobile: satu bar kompak 76px, nav masuk menu hamburger
+       (pola yang sama seperti board OTC) — sebelumnya membungkus 157px. */
+    .site-in{gap:12px;height:76px;min-height:76px;flex-wrap:nowrap;padding:0 12px;position:relative}
+    .logo{font-size:18px}
+    #connectBtn{padding:10px 12px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+    .menu-btn{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;flex:0 0 auto;font-size:18px}
+    nav.nav{display:none}
+    nav.nav.open{display:flex;position:absolute;top:76px;left:0;right:0;flex-direction:column;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 20px 12px;gap:0;z-index:60}
+    nav.nav.open a{padding:12px 0;border-bottom:1px solid var(--line)}
+    nav.nav.open a:last-child{border-bottom:none}
   }
 </style>
 </head>
@@ -377,12 +386,13 @@ pako/dist/pako.esm.mjs:
 <header class="site">
   <div class="site-in">
     <a class="logo" href="https://vena-main.fly.dev">vena<span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></a>
-    <nav class="nav">
-      <a href="https://vena-main.fly.dev">Home</a>
-      <a href="#" class="on">Mining</a>
-      <a href="https://vena-mint.fly.dev/" target="_blank" rel="noopener">Mint</a>
-      <a href="https://vena-faucet.fly.dev" target="_blank" rel="noopener">Faucet</a>
-      <a href="https://vena-docs.fly.dev" target="_blank" rel="noopener">Docs</a>
+    <button class="menu-btn" id="menuBtn" aria-expanded="false" aria-controls="siteNav" onclick="toggleMenu()" title="Menu">☰</button>
+    <nav class="nav" id="siteNav">
+      <a href="https://vena-main.fly.dev" onclick="closeMenu()">Home</a>
+      <a href="#" class="on" onclick="closeMenu()">Mining</a>
+      <a href="https://vena-mint.fly.dev/" target="_blank" rel="noopener" onclick="closeMenu()">Mint</a>
+      <a href="https://vena-faucet.fly.dev" target="_blank" rel="noopener" onclick="closeMenu()">Faucet</a>
+      <a href="https://vena-docs.fly.dev" target="_blank" rel="noopener" onclick="closeMenu()">Docs</a>
     </nav>
     <span class="spacer"></span>
     <button id="connectBtn" class="btn-cyan" onclick="connectWallet()">Connect Phantom</button>
@@ -410,6 +420,7 @@ pako/dist/pako.esm.mjs:
 
   <section class="card">
     <h2><span class="br">[CLAIM]</span>Claim &amp; Withdraw</h2>
+    <div id="claimWarn" class="note" style="display:none"></div>
     <div class="actions">
       <button id="claimBtn" onclick="doClaim()" disabled>Claim → Lock</button>
       <button id="wdBtn" onclick="doWithdraw()" disabled>Withdraw</button>
@@ -465,8 +476,8 @@ pako/dist/pako.esm.mjs:
     <label>Nonce</label>
     <input id="nonceIn" type="number" value="0" min="0" step="1" disabled>
     <div class="actions">
-      <button type="button" class="ghost" onclick="fetchPuzzle()">Ambil Puzzle</button>
-      <button type="button" class="ghost" onclick="downloadCnf()">Download CNF</button>
+      <button type="button" class="ghost" id="puzzleBtn" onclick="fetchPuzzle()" disabled>Ambil Puzzle</button>
+      <button type="button" class="ghost" id="cnfBtn" onclick="downloadCnf()" disabled>Download CNF</button>
     </div>
     <div id="seedNote" class="dim" style="font-size:12px;margin-top:6px"></div>
     <div id="puzzleMeta" style="margin-top:12px"><div class="row"><span class="k">Puzzle</span><span class="v dim">—</span></div></div>
@@ -522,17 +533,65 @@ function gateButtons(){
   const solvesToday = effectiveSolvesToday();
   const quotaLeft = hasMiner ? (quota + (boosted ? 1 : 0) - solvesToday) : 0;
   const pending = hasMiner ? Number(minerData.pendingRewards) : 0;
+  // Tenggat klaim (M3): claim setelah pending_since + claim_window_secs
+  // akan MEMBAKAR seluruh pending (program, by design) — tombol Claim
+  // harus mati saat tenggat lewat, bukan tetap bisa diklik.
+  const claimExpired = hasMiner && !!configData && pending > 0 && Number(minerData.pendingSince) > 0 &&
+    (Number(minerData.pendingSince) + Number(configData.claimWindowSecs)) * 1000 <= Date.now();
+  // Fee-debt cap (M4): submit ke-4 tanpa claim/withdraw ditolak program
+  // (DebtCapExceeded) — matikan Submit saat debt sudah maksimal.
+  const debtLamports = hasMiner ? Number(minerData.debtLamports) : 0;
+  const maxDebtLamports = configData ? Number(configData.maxDebtLamports) : 0;
+  const debtFull = hasMiner && !!configData && maxDebtLamports > 0 && debtLamports >= maxDebtLamports;
   const lockReleasable = lockExists && lockData ? (Number(lockData.totalLocked) > Number(lockData.totalReleased)) : false;
   const set = (id, enabled, why) => { const b = $(id); if (!b) return; b.disabled = !enabled; b.title = enabled ? "" : why; };
-  set("stakeBtn", hasWallet && !staked, staked ? "Sudah ada stake aktif — Unstake dulu sebelum stake lagi." : "Hubungkan wallet dulu.");
+  set("stakeBtn", hasWallet && !!configData && !staked, !configData ? "Config belum dimuat — coba lagi sebentar lagi." : (staked ? "Sudah ada stake aktif — Unstake dulu sebelum stake lagi." : "Hubungkan wallet dulu."));
   set("unstakeBtn", hasWallet && staked && lockExpired, !staked ? "Belum ada stake." : (!lockExpired ? "Stake masih terkunci sampai lock habis." : "Hubungkan wallet dulu."));
   set("recoverBtn", hasWallet && !!stuckNft, stuckNft ? "" : "Tidak ada NFT yang stuck di escrow.");
-  set("submitBtn", hasWallet && staked && !lockExpired && quotaLeft > 0, !staked ? "Stake dulu sebelum submit." : (lockExpired ? "Lock stake sudah habis — Unstake lalu Stake lagi." : (quotaLeft <= 0 ? "Kuota solve hari ini sudah habis." : "Hubungkan wallet dulu.")));
-  set("claimBtn", hasWallet && pending > 0, pending > 0 ? "" : "Tidak ada reward pending — submit solve dulu.");
+  set("submitBtn", hasWallet && staked && !lockExpired && quotaLeft > 0 && !debtFull, !staked ? "Stake dulu sebelum submit." : (lockExpired ? "Lock stake sudah habis — Unstake lalu Stake lagi." : (debtFull ? "Fee-debt penuh (" + fmtLam(debtLamports) + ") — Claim/Withdraw dulu untuk reset." : (quotaLeft <= 0 ? "Kuota solve hari ini sudah habis." : "Hubungkan wallet dulu."))));
+  set("claimBtn", hasWallet && pending > 0 && !claimExpired, !hasWallet ? "Hubungkan wallet dulu." : (pending <= 0 ? "Tidak ada reward pending — submit solve dulu." : "Tenggat klaim lewat — klaim sekarang akan MEMBAKAR reward ini."));
   set("wdBtn", hasWallet && lockReleasable, lockReleasable ? "" : "Tidak ada token yang sudah rilis di lock — claim dulu, lalu tunggu vesting.");
+  // (m10) "Ambil Puzzle" butuh wallet + stake aktif + kuota tersisa (puzzle
+  // yang diambil tapi tidak bisa di-submit hari ini hanya membuang seed);
+  // "Download CNF" butuh puzzle yang sudah ditugaskan.
+  set("puzzleBtn", hasWallet && staked && !lockExpired && quotaLeft > 0 && !debtFull, !staked ? "Stake dulu sebelum ambil puzzle." : (lockExpired ? "Lock stake sudah habis — Unstake lalu Stake lagi." : (debtFull ? "Fee-debt penuh — Claim/Withdraw dulu untuk reset." : (quotaLeft <= 0 ? "Kuota solve hari ini sudah habis." : "Hubungkan wallet dulu."))));
+  set("cnfBtn", !!currentPuzzle, "Ambil puzzle dulu.");
+  // Peringatan tenggat klaim di kartu [CLAIM] itu sendiri (M3) — bukan
+  // hanya di [MINER], karena tombol Claim ada di sini.
+  const cw = $("claimWarn");
+  if (cw){
+    if (claimExpired){
+      cw.style.display = "";
+      cw.innerHTML = '<span class="err">Tenggat klaim sudah lewat — klaim sekarang akan MEMBAKAR ' + fmtTok(pending) + ' token pending ini.</span><br><span class="dim">Solusi: submit 1 solve lagi — tenggat seluruh pending ikut diperbarui (30 hari baru).</span>';
+    } else { cw.style.display = "none"; cw.innerHTML = ""; }
+  }
 }
 
 const $ = id => document.getElementById(id);
+// Menu hamburger mobile (m11): nav masuk dropdown di <=700px. Tutup saat
+// link diklik, saat klik di luar menu, atau saat Escape.
+function toggleMenu(){
+  const nav = $("siteNav"), btn = $("menuBtn");
+  if (!nav || !btn) return;
+  const open = !nav.classList.contains("open");
+  nav.classList.toggle("open", open);
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  btn.textContent = open ? "✕" : "☰";
+}
+function closeMenu(){
+  const nav = $("siteNav"), btn = $("menuBtn");
+  if (!nav || !btn) return;
+  nav.classList.remove("open");
+  btn.setAttribute("aria-expanded", "false");
+  btn.textContent = "☰";
+}
+document.addEventListener("click", (e) => {
+  const nav = $("siteNav"), btn = $("menuBtn");
+  if (!nav || !nav.classList.contains("open")) return;
+  if (nav.contains(e.target) || (btn && btn.contains(e.target))) return;
+  closeMenu();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
 const fmtTok = raw => (Number(raw) / 1e6).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const fmtLam = lam => (Number(lam) / 1e9).toFixed(4) + " SOL";
 const short = pk => pk ? pk.toString().slice(0,4) + "…" + pk.toString().slice(-4) : "—";
@@ -629,9 +688,14 @@ function refreshStakeForm(){
     nftTierSeg.style.display = "";
     chkRow.style.display = "";
     chk.disabled = false;
-    // NFT: hanya Stake + Recover NFT — Unstake bukan di sini.
-    $("unstakeBtn").style.display = "none";
+    // NFT: Stake + Unstake + Recover NFT. Unstake HARUS terlihat di sini
+    // (M5): staker NFT yang mau unstake tidak menemukan tombolnya kalau
+    // disembunyikan — dan Recover NFT justru hanya berfungsi SETELAH
+    // unstake (untuk NFT yang stuck di escrow). Gate Unstake tetap di
+    // gateButtons (aktif hanya setelah lock habis).
+    $("unstakeBtn").style.display = "";
     $("recoverBtn").style.display = "";
+    $("recoverBtn").title = "Hanya untuk NFT yang stuck di escrow setelah unstake — unstake dulu.";
     // Kuota dari config on-chain (bukan hardcode) — config test: Regular 4,
     // Special 8, Holder 10; config produksi: 4/8/1.
     const base = tier === 1 ? (configData ? Number(configData.quotaRegular) : 4) : (configData ? Number(configData.quotaSpecial) : 8);
@@ -647,6 +711,22 @@ function refreshStakeForm(){
     }
   }
 }
+// DAS getAssetsByOwner, dipaginasi (m8): limit 100/halaman tidak cukup
+// untuk wallet dengan >100 aset — ulangi halaman sampai hasilnya < limit
+// (maks 10 halaman = 1.000 aset, pengaman supaya tidak loop selamanya).
+async function dasAssetsByOwner(owner){
+  const out = [];
+  for (let page = 1; page <= 10; page++){
+    const r = await fetch(RPC_URL, {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({jsonrpc: "2.0", id: 1, method: "getAssetsByOwner",
+        params: {ownerAddress: owner.toString(), page, limit: 100}})});
+    const j = await r.json();
+    const items = (j.result && j.result.items) || [];
+    out.push(...items);
+    if (items.length < 100) break;
+  }
+  return out;
+}
 // Cari NFT pass VENA di wallet via DAS getAssetsByOwner (RPC publik dukung).
 // Mengisi dropdown — user tinggal pilih, tidak perlu ketik mint address manual.
 let myNfts = []; // [{id, name, tier}]
@@ -659,11 +739,7 @@ async function fetchMyNfts(force){
   try{
     const reg = configData.collectionRegular.toString();
     const spec = configData.collectionSpecial.toString();
-    const r = await fetch(RPC_URL, {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({jsonrpc: "2.0", id: 1, method: "getAssetsByOwner",
-        params: {ownerAddress: walletPubkey.toString(), page: 1, limit: 100}})});
-    const j = await r.json();
-    const items = (j.result && j.result.items) || [];
+    const items = await dasAssetsByOwner(walletPubkey);
     myNfts = [];
     for (const it of items){
       if (it.interface !== "MplCoreAsset") continue;
@@ -720,11 +796,7 @@ async function fetchStuckNft(){
     const reg = configData.collectionRegular.toString();
     const spec = configData.collectionSpecial.toString();
     const activeNft = (minerData && minerData.stakedNft) ? minerData.stakedNft.toString() : null;
-    const r = await fetch(RPC_URL, {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({jsonrpc: "2.0", id: 1, method: "getAssetsByOwner",
-        params: {ownerAddress: minerPda.toString(), page: 1, limit: 100}})});
-    const j = await r.json();
-    const items = (j.result && j.result.items) || [];
+    const items = await dasAssetsByOwner(minerPda);
     for (const it of items){
       if (it.interface !== "MplCoreAsset") continue;
       if (activeNft && it.id === activeNft) continue; // lagi di-stake, bukan stuck
@@ -762,12 +834,48 @@ function ata(owner, mint){
     ASSOCIATED_TOKEN_PROGRAM_ID)[0];
 }
 
+let phantomWatched = false;
+// (m6) Phantom bisa ganti akun / disconnect kapan saja — tanpa listener,
+// halaman tetap menampilkan data wallet LAMA dan tx yang dibangun memakai
+// Miner PDA wallet lama (ditolak program). Dengarkan accountChanged +
+// disconnect, lalu muat ulang state untuk akun yang baru.
+function watchPhantom(){
+  if (phantomWatched || !window.solana || !window.solana.on) return;
+  phantomWatched = true;
+  window.solana.on("accountChanged", (pk) => { onPhantomAccount(pk); });
+  window.solana.on("disconnect", () => { onPhantomAccount(null); });
+}
+async function onPhantomAccount(pk){
+  if (!pk){
+    walletPubkey = null; minerData = null; lockData = null; lockExists = false;
+    myNfts = []; stuckNft = null; currentPuzzle = null;
+    const cb = $("connectBtn"); if (cb){ cb.textContent = "Connect Phantom"; cb.disabled = false; }
+    const ma = $("minerAddr"); if (ma) ma.textContent = "";
+    $("minerStatus").innerHTML = row("Wallet terputus", "Hubungkan Phantom lagi.", "warn");
+    $("lockStatus").innerHTML = "";
+    $("puzzleId").textContent = "—";
+    $("puzzleMeta").innerHTML = '<div class="row"><span class="k">Puzzle</span><span class="v dim">—</span></div>';
+    const aIn = $("assignmentIn"); if (aIn) aIn.value = "";
+    gateButtons();
+    log("Wallet terputus / akun berubah — hubungkan lagi.", "err");
+    return;
+  }
+  if (walletPubkey && pk.toString() === walletPubkey.toString()) return;
+  walletPubkey = pk;
+  myNfts = []; stuckNft = null; currentPuzzle = null;
+  const cb2 = $("connectBtn"); if (cb2) cb2.textContent = "Terhubung: " + short(walletPubkey);
+  const ma2 = $("minerAddr"); if (ma2) ma2.textContent = "— " + walletPubkey.toString();
+  log("Akun Phantom berubah: " + walletPubkey.toString(), "ok");
+  await refreshAll();
+}
+
 async function connectWallet(){
   try{
     if (!window.solana || !window.solana.isPhantom){ log("Phantom tidak terdeteksi. Install Phantom dulu.", "err"); return; }
     connection = new solanaWeb3.Connection(RPC_URL, "confirmed");
     const resp = await window.solana.connect();
     walletPubkey = resp.publicKey;
+    watchPhantom();
     provider = new anchor.AnchorProvider(connection, window.solana, {commitment: "confirmed"});
     anchor.setProvider(provider);
     program = new anchor.Program(IDL, provider);
@@ -826,12 +934,18 @@ async function loadMiner(){
     const lockUntil = new Date(Number(m.lockUntil) * 1000);
     const now = Date.now();
     const locked = Number(m.lockUntil) * 1000 > now;
+    // Kuota efektif (m1): penyebutnya kuota dasar +1 kalau boosted, supaya
+    // tampil "8 / 9" bukan "8 / 8 (+1 staking)" yang terbaca seperti sudah
+    // penuh padahal masih ada 1 solve.
+    const baseQuota = configData ? (Number(m.tier) === 1 ? Number(configData.quotaRegular) : Number(m.tier) === 2 ? Number(configData.quotaSpecial) : Number(configData.quotaHolder)) : 0;
+    const effQuota = baseQuota + (m.boosted ? 1 : 0);
+    const debtFullNow = configData && Number(configData.maxDebtLamports) > 0 && Number(m.debtLamports) >= Number(configData.maxDebtLamports);
     $("minerStatus").innerHTML =
       row("Tier", tierName + (m.boosted ? ' <span class="pill on">+1 solve/hari (staking)</span>' : "")) +
       row("Status", locked ? `<span class="pill off">Terkunci sampai ${lockUntil.toLocaleString("id-ID")}</span>` : `<span class="pill on">Bebas (lock habis)</span>`) +
       row("Token di-stake", fmtTok(m.stakedTokens) + " token") +
       row("NFT pass", m.stakedNft ? `<span class="mono">${short(m.stakedNft)}</span>` : "— (Holder)") +
-      row("Solve hari ini", effectiveSolvesToday() + " / " + (Number(m.tier) === 1 ? configData.quotaRegular : Number(m.tier) === 2 ? configData.quotaSpecial : configData.quotaHolder) + (m.boosted ? " (+1 staking)" : "")) +
+      row("Solve hari ini", effectiveSolvesToday() + " / " + effQuota + (m.boosted ? " (termasuk +1 staking)" : "")) +
       row("Total solve", m.totalSolves) +
       row("Reward pending", fmtTok(m.pendingRewards) + " token", Number(m.pendingRewards) > 0 ? "good" : "") +
       // Tenggat klaim: reward pending hangus kalau tidak diklaim dalam
@@ -840,7 +954,7 @@ async function loadMiner(){
       // laporan user: 0,034375 VENA hangus karena UI tidak menunjukkan
       // tenggat). Devnet: 600 dtk (10 mnt); produksi: 30 hari.
       claimDeadlineRow(m) +
-      row("Utang fee submit", fmtLam(m.debtLamports), Number(m.debtLamports) > 0 ? "warn" : "") +
+      row("Utang fee submit", fmtLam(m.debtLamports) + (debtFullNow ? " — PENUH, claim/withdraw dulu" : ""), Number(m.debtLamports) > 0 ? "warn" : "") +
       row("Next nonce", m.nextNonce.toString()) +
       row("Miner PDA", `<span class="mono">${short(minerPda)}</span>`);
     $("nonceIn").value = m.nextNonce.toString();
@@ -870,25 +984,57 @@ function needProgram(){
   if (!program){ log("Hubungkan wallet dulu.", "err"); return false; }
   return true;
 }
+// Konfirmasi tx lewat HTTP polling (getSignatureStatuses, 90 dtk) —
+// BUKAN websocket confirmTransaction: RPC devnet sering 503 di websocket
+// sehingga konfirmasi timeout padahal tx berhasil, dan UI menampilkan
+// state kedaluwarsa (m7). Pola yang sama seperti perbaikan /faucet
+// koordinator.
+async function confirmTx(sig){
+  const start = Date.now();
+  for (;;){
+    const st = await connection.getSignatureStatuses([sig]);
+    const s = st && st.value && st.value[0];
+    if (s){
+      if (s.err) throw new Error("Transaksi gagal on-chain: " + JSON.stringify(s.err));
+      if (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized") return;
+    }
+    if (Date.now() - start > 90000) throw new Error("Konfirmasi timeout 90 dtk — cek di Solscan, transaksi mungkin sudah berhasil: " + solscan(sig));
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
 async function sendTx(ixs, label){
+  let sig = null;
   try{
     const tx = new solanaWeb3.Transaction();
     ixs.forEach(ix => tx.add(ix));
     tx.feePayer = walletPubkey;
     const {blockhash} = await connection.getLatestBlockhash("confirmed");
     tx.recentBlockhash = blockhash;
+    // Aturan 60 detik: blockhash kedaluwarsa ~1–2 menit — tanda tangani
+    // sekarang dan tetap di halaman ini sampai selesai.
+    log("Tanda tangani di Phantom sekarang — transaksi kedaluwarsa dalam ~1 menit. Tetap di halaman ini.", "warn");
     const signed = await window.solana.signTransaction(tx);
-    const sig = await connection.sendRawTransaction(signed.serialize());
+    sig = await connection.sendRawTransaction(signed.serialize());
     log(label + " terkirim: " + sig);
-    await connection.confirmTransaction(sig, "confirmed");
+    await confirmTx(sig);
     log(label + " terkonfirmasi ✓ — " + solscan(sig), "ok");
     await refreshAll();
     return sig;
-  }catch(e){ log(label + " gagal: " + (e.message || e), "err"); return null; }
+  }catch(e){
+    log(label + " gagal: " + (e.message || e), "err");
+    // Kalau tx sudah terkirim tapi konfirmasi timeout, refresh state supaya
+    // UI tidak menampilkan data kedaluwarsa (user bisa mengira tx gagal
+    // padahal berhasil — lalu submit/mint dua kali).
+    if (sig){ try{ await refreshAll(); }catch(_){} }
+    return null;
+  }
 }
 
 async function doStake(){
   if (!needProgram()) return;
+  // (m9) config wajib sudah dimuat — tanpa ini configData.mint melempar
+  // TypeError yang tidak membantu ("Cannot read properties of null").
+  if (!configData){ log("Config belum dimuat — coba lagi sebentar lagi.", "err"); return; }
   const tier = currentTier();
   // NFT dan token terpisah: Holder WAJIB stake token (min. tahun ini).
   // NFT tier boleh stake NFT SAJA (token 0, kuota dasar) atau NFT + token
@@ -992,7 +1138,7 @@ async function doWithdraw(){
       tokenProgram: TOKEN_PROGRAM_ID, systemProgram: solanaWeb3.SystemProgram.programId
     }).instruction();
     ixs.push(ix);
-    await sendTx(ixs, "Withdraw" + (amt === 0 ? " (semua)" : ""));
+    await sendTx(ixs, "Withdraw (semua)");
   }catch(e){ log("Withdraw gagal: " + (e.message || e), "err"); }
 }
 
@@ -1236,10 +1382,18 @@ function renderPuzzleMeta(p){
 
 async function fetchPuzzle(){
   if (!walletPubkey){ log("Connect Phantom dulu.", "err"); return null; }
+  // (m3) Puzzle aktif yang sedang dikerjakan jangan dibuang diam-diam:
+  // assign ulang membuat seed lama tidak valid (INVALID_SEED) di koordinator.
+  if (currentPuzzle){
+    if (!confirm(`Puzzle #${currentPuzzle.id} sedang kamu kerjakan. Ambil puzzle baru akan membatalkan puzzle ini (seed lama tidak berlaku lagi). Lanjutkan?`)) return currentPuzzle;
+  }
   try{
     log(`Mengambil puzzle (otomatis — yang belum pernah di-submit) dari koordinator…`);
     // 1) Jalur seed-based baru dulu: GET /puzzle/seed-assign.
-    //    Belum live (404) atau error apa pun -> fallback ke jalur lama.
+    //    Hanya 404 (endpoint belum live) atau error jaringan yang fallback
+    //    ke jalur lama. 429 (rate limit) dan error HTTP lain TIDAK fallback
+    //    (m2): mengambil puzzle lain akan membuang puzzle yang sedang
+    //    dikerjakan, dan 429 artinya "tunggu", bukan "ganti puzzle".
     try{
       const sr = await fetch(`${COORDINATOR_URL}/puzzle/seed-assign?wallet=${walletPubkey.toString()}`);
       if (sr.ok){
@@ -1261,9 +1415,18 @@ async function fetchPuzzle(){
         renderPuzzleMeta(currentPuzzle);
         const aIn = $("assignmentIn"); if (aIn) aIn.value = "";
         log(`Puzzle #${currentPuzzle.id} (seed): ${currentPuzzle.vars} variabel, ${currentPuzzle.clauses} klausa. CNF dibuat lokal dari seed — Download CNF lalu solve pakai Kissat di PC.`);
+        gateButtons();
         return currentPuzzle;
       }
-      if (sr.status !== 404) log(`Seed-assign belum tersedia (HTTP ${sr.status}), fallback ke jalur file-CNF…`, "dim");
+      if (sr.status === 429){
+        log("Rate limit koordinator (1 assign/menit/wallet) — tunggu sebentar lalu coba lagi. Puzzle yang sedang dikerjakan TIDAK dibatalkan.", "err");
+        return null;
+      }
+      if (sr.status !== 404){
+        log(`Seed-assign error HTTP ${sr.status} — tidak fallback ke jalur lain supaya puzzle aktif tidak terbuang. Coba lagi sebentar lagi.`, "err");
+        return null;
+      }
+      log("Seed-assign belum tersedia (404), fallback ke jalur file-CNF…", "dim");
     }catch(e){
       // 404 / error jaringan / respons tidak lengkap: fallback diam-diam
       // ke jalur lama di bawah (yang menentukan gagal/tidak).
@@ -1284,6 +1447,7 @@ async function fetchPuzzle(){
     // baru (koordinator akan tolak INVALID_SOLUTION, tapi UI harus jelas).
     const aIn = $("assignmentIn"); if (aIn) aIn.value = "";
     log(`Puzzle #${pj.puzzle_id}: ${pj.vars} variabel, ${pj.clauses} klausa. Download CNF lalu solve pakai Kissat di PC.`);
+    gateButtons();
     return currentPuzzle;
   }catch(e){ log("Ambil puzzle gagal: " + (e.message || e), "err"); return null; }
 }
@@ -1323,9 +1487,20 @@ async function downloadCnf(){
 // per variabel, urutan var 1..nVars (positif = true, negatif = false) —
 // format yang sama seperti dulu dihasilkan dpllSolve. Menerima angka yang
 // dipisah spasi/koma/baris baru, juga format output Kissat ("v 1 -2 3 ... 0").
-// Angka 0 (terminator DIMACS) diabaikan. Ini hanya parsing, BUKAN verifikasi.
+// HANYA baris assignment yang dibaca: baris komentar Kissat ("c ..."),
+// baris status ("s ...") dan header ("p cnf ...") dibuang dulu, karena
+// angka-angka di dalamnya BUKAN assignment. Regex atas seluruh teks pernah
+// mengambil angka-angka itu dan membuat validasi jumlah gagal (bug M2:
+// output Kissat lengkap vars=10 menghasilkan 15 angka). Baris assignment
+// polos ("1 -2 3 ...") maupun baris Kissat ("v 1 -2 3 ... 0") sama-sama
+// dibaca. Angka 0 (terminator DIMACS) diabaikan. Ini hanya parsing,
+// BUKAN verifikasi.
 function parseAssignment(text){
-  return (text.match(/-?\d+/g) || []).map(Number).filter(n => n !== 0);
+  const lines = String(text).split("\n").filter(l => {
+    const t = l.trim();
+    return t && !t.startsWith("c") && !t.startsWith("s") && !t.startsWith("p");
+  });
+  return (lines.join("\n").match(/-?\d+/g) || []).map(Number).filter(n => n !== 0);
 }
 
 async function doSubmit(){
@@ -1351,6 +1526,9 @@ async function doSubmit(){
       }
     }
     log(`Mengirim assignment puzzle #${pid} ke koordinator…`);
+    // (m4) Baca ulang Miner on-chain sebelum tanda tangan: nonce dari
+    // cache bisa kedaluwarsa kalau user submit dari tab/perangkat lain.
+    await loadMiner();
     // Autentikasi (anti-griefing): tanda tangan request ini pakai wallet.
     // Tanpa ini, siapa pun bisa submit solusi untuk wallet orang lain dan
     // menghabiskan kuota harian korban. Pesan terikat ke (wallet, puzzle,
@@ -1375,7 +1553,7 @@ async function doSubmit(){
     log("Solscan: " + sj.solscan, "ok");
     await loadMiner(); await loadVault();
   }catch(e){ log("Submit gagal: " + (e.message || e), "err"); }
-  finally{ btn.disabled = false; }
+  finally{ gateButtons(); } // (m5) jangan aktifkan paksa — patuhi gate (kuota/debt/lock).
 }
 
 // Load program status tanpa wallet (read-only)
