@@ -449,7 +449,6 @@ pako/dist/pako.esm.mjs:
       <div class="note" id="nftPickNote"><span class="dim">—</span></div>
       <label style="margin-top:8px">Mint address</label>
       <input id="nftAsset" type="text" placeholder="mint address NFT pass">
-      <div class="note" id="nftBenefit"></div>
     </div>
     <div id="tokenBox">
       <label id="tokenChkRow" style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -460,7 +459,6 @@ pako/dist/pako.esm.mjs:
         <label>Jumlah token — min. tahun <span id="miningYearLbl">1</span>: <span id="minStakeLbl">1.000</span></label>
         <div class="mono" id="stakeAmtFixed" style="font-size:18px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:0">1.000 token</div>
       </div>
-      <div class="note" id="tokenBenefit"></div>
     </div>
     <div class="actions">
       <button id="stakeBtn" class="green" onclick="doStake()" disabled>Stake</button>
@@ -668,8 +666,7 @@ function refreshStakeForm(){
   const chk = $("stakeTokenChk");
   const chkRow = $("tokenChkRow");
   const nftBox = $("nftBox"), nftTierSeg = $("nftTierSeg"), tokenAmtBox = $("tokenAmtBox");
-  const nftBen = $("nftBenefit"), tokBen = $("tokenBenefit"), chkLbl = $("tokenChkLbl");
-  const m = yearMinStakeTokens().toLocaleString("en-US");
+  const chkLbl = $("tokenChkLbl");
   if (tier === 3){
     nftBox.style.display = "none";
     nftTierSeg.style.display = "none";
@@ -677,9 +674,6 @@ function refreshStakeForm(){
     chkRow.style.display = "none";
     chk.checked = true; chk.disabled = true;
     tokenAmtBox.style.display = "";
-    const holderQuota = configData ? Number(configData.quotaHolder) : 1;
-    tokBen.textContent = "Benefit Holder: " + holderQuota + " solve/hari + bonus reward 10% (2,2 token/solve). Token dikunci 1 bulan, tidak bisa unstake dini.";
-    nftBen.textContent = "";
     // Token: hanya Stake + Unstake — Recover NFT itu khusus NFT, sembunyikan.
     $("unstakeBtn").style.display = "";
     $("recoverBtn").style.display = "none";
@@ -696,18 +690,14 @@ function refreshStakeForm(){
     $("unstakeBtn").style.display = "";
     $("recoverBtn").style.display = "";
     $("recoverBtn").title = "Hanya untuk NFT yang stuck di escrow setelah unstake — unstake dulu.";
-    // Kuota dari config on-chain (bukan hardcode) — config test: Regular 4,
-    // Special 8, Holder 10; config produksi: 4/8/1.
-    const base = tier === 1 ? (configData ? Number(configData.quotaRegular) : 4) : (configData ? Number(configData.quotaSpecial) : 8);
-    nftBen.textContent = (tier === 1 ? "Benefit Regular" : "Benefit Special") + " NFT saja: " + base + " solve/hari + bonus reward 10% (2,2 token/solve). NFT masuk escrow program, kembali saat unstake.";
+    // Kuota per tier tampil di tombol tier itu sendiri (Regular — 4/hari,
+    // Special — 8/hari); penjelasan benefit ada di dokumentasi, bukan di web.
     if (chk.checked){
       chkLbl.textContent = "Stake token juga (boost +1 solve/hari)";
       tokenAmtBox.style.display = "";
-      tokBen.textContent = "Dengan stake " + m + " token: kuota naik jadi " + (base + 1) + " solve/hari. Bonus reward tetap 10% (tidak naik walau stake lebih banyak).";
     } else {
       chkLbl.textContent = "Stake token juga (boost +1 solve/hari)";
       tokenAmtBox.style.display = "none";
-      tokBen.textContent = "Tanpa stake token: kuota tetap " + base + " solve/hari, bonus reward tetap 10%. Centang untuk tambah stake token dan dapat +1 solve/hari.";
     }
   }
 }
