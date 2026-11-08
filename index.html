@@ -1531,7 +1531,13 @@ async function doSubmit(){
     // Pesan tanda tangan VENA-SUBMIT sama di kedua jalur.
     const submitUrl = currentPuzzle.seedBased ? `${COORDINATOR_URL}/submit-seed` : `${COORDINATOR_URL}/submit`;
     const submitBody = {miner_wallet: walletPubkey.toString(), puzzle_id: pid, assignment, signature};
-    if (currentPuzzle.seedBased) submitBody.seed = currentPuzzle.seed;
+    if (currentPuzzle.seedBased) {
+      submitBody.seed = currentPuzzle.seed;
+      // issued_at: koordinator memakainya untuk memverifikasi seed (HMAC)
+      // kalau cache assignment-nya sudah hilang (mis. koordinator restart).
+      // Tanpa ini, submit gagal INVALID_SEED kalau solve-nya kelamaan.
+      if (currentPuzzle.issuedAt) submitBody.issued_at = currentPuzzle.issuedAt;
+    }
     const sr = await fetch(submitUrl, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
