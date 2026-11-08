@@ -859,11 +859,11 @@ async function onPhantomAccount(pk){
   await refreshAll();
 }
 
-async function connectWallet(){
+async function connectWallet(silent){
   try{
-    if (!window.solana || !window.solana.isPhantom){ log("Phantom tidak terdeteksi. Install Phantom dulu.", "err"); return; }
+    if (!window.solana || !window.solana.isPhantom){ if(!silent) log("Phantom tidak terdeteksi. Install Phantom dulu.", "err"); return; }
     connection = new solanaWeb3.Connection(RPC_URL, "confirmed");
-    const resp = await window.solana.connect();
+    const resp = await window.solana.connect(silent ? { onlyIfTrusted: true } : undefined);
     walletPubkey = resp.publicKey;
     watchPhantom();
     provider = new anchor.AnchorProvider(connection, window.solana, {commitment: "confirmed"});
@@ -873,9 +873,9 @@ async function connectWallet(){
     $("connectBtn").textContent = "Terhubung: " + short(walletPubkey);
     $("connectBtn").disabled = true;
     $("minerAddr").textContent = "— " + walletPubkey.toString();
-    log("Wallet terhubung: " + walletPubkey.toString(), "ok");
+    log(silent ? "Wallet terhubung kembali (otomatis): " + walletPubkey.toString() : "Wallet terhubung: " + walletPubkey.toString(), "ok");
     await refreshAll();
-  }catch(e){ log("Gagal connect: " + (e.message || e), "err"); }
+  }catch(e){ if(!silent) log("Gagal connect: " + (e.message || e), "err"); }
 }
 
 async function refreshAll(){
@@ -1558,6 +1558,10 @@ async function doSubmit(){
     await loadConfig();
     await loadVault();
     log("Program status dimuat (read-only). Hubungkan Phantom untuk aksi.", "dim");
+    // Auto-reconnect: kalau wallet sudah pernah di-approve di situs ini,
+    // Phantom mengembalikan koneksi diam-diam (tanpa popup), supaya wallet
+    // tetap konek saat tab di-reload / pindah tab di Chrome mobile.
+    await connectWallet(true);
   }catch(e){ log("Gagal muat status program: " + (e.message || e), "err"); }
 })();
 </script>
